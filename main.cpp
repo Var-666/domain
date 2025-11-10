@@ -6,7 +6,7 @@ int main()
 {
     try
     {
-        AsioServer server(8080);
+        AsioServer server(8080, 2, 2);
         server.run();
     }
     catch (const std::exception &e)
