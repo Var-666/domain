@@ -115,7 +115,8 @@ void EpollServer::handleNewConnection(){
     sockaddr_in clientAddr{};
     socklen_t clientAddrLen = sizeof(clientAddr);
     int connfd = accept(listen_fd_, (sockaddr*)&clientAddr, &clientAddrLen);
-    if(client_fd == -1){
+    if (connfd == -1)
+    {
       if(errno == EAGAIN || errno == EWOULDBLOCK){
         // 处理完所有连接
         break;
@@ -127,7 +128,7 @@ void EpollServer::handleNewConnection(){
     // 设置非阻塞
     if (!setNonBlocking(connfd))
     {
-      close(client_fd);
+      close(connfd);
       continue;
     }
 
@@ -137,7 +138,7 @@ void EpollServer::handleNewConnection(){
 
     if(epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, connfd, &ev) == -1){
       std::cerr << "epoll_ctl(ADD) failed, client_fd: " << connfd << ", errno: " << errno << std::endl;
-      close(client_fd);
+      close(connfd);
       continue;
     }
 
