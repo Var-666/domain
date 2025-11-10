@@ -230,3 +230,17 @@ void EpollServer::loop() {
         }
     }
 }
+
+void EpollServer::stop() {
+    is_running_ = false;
+
+    if (listen_fd_ != -1) {
+        close(listen_fd_);
+        listen_fd_ = -1;
+    }
+
+    if (epoll_fd_ != -1) {
+        close(epoll_fd_);
+        epoll_fd_ = -1;
+    }
+}
