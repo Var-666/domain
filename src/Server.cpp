@@ -18,14 +18,14 @@ EpollServer::~EpollServer() {
 }
 
 bool EpollServer::setNonBlocking(int fd) {
-    int flasgs = fcntl(fd, F_GETFL, 0);
+    int flags = fcntl(fd, F_GETFL, 0);
     // 获取文件描述符状态标志失败
     if(flags == -1){
       std::cerr << "fcntl(F_GETFL) failed, fd: " << fd << ", errno: " << errno << std::endl;
       return false;
     }
     // 设置非阻塞
-    if(fcntl(fd,F_SETFL,flasgs | O_NONBLOCK) == -1){
+    if(fcntl(fd,F_SETFL,flags | O_NONBLOCK) == -1){
       std::cerr << "fcntl(F_SETFL) failed, fd: " << fd << ", errno: " << errno << std::endl;
       return false;
     }
