@@ -1,17 +1,18 @@
-#include "EpollServer.h"
+#include "AsioServer.h"
 
 #include <iostream>
 
-int main() {
-    std::cout << "Hello, World!" << std::endl;
-
-    EpollServer server(8080);
-
-    if(!server.init()) {
-        std::cerr << "Failed to initialize server." << std::endl;
-        return -1;
+int main()
+{
+    try
+    {
+        AsioServer server(8080);
+        server.run();
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << e.what() << '\n';
     }
 
-    std::cout << "Server is running on port 8080..." << std::endl;
-    server.loop();
+    std::cout << "Hello, World!" << std::endl;
 }

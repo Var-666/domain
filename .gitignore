@@ -1,6 +1,7 @@
 # ---- 构建输出 ----
 /build/
 /cmake-build-*/
+/.vscode/
 
 # ---- 二进制文件 ----
 *.out
