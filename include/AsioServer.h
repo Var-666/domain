@@ -1,27 +1,44 @@
 #pragma once
 
+#include <boost/asio.hpp>
+#include <functional>
+#include <memory>
+#include <thread>
+#include <vector>
+
+#include "AsioConnection.h"
+#include "ConnectionManager.h"
 #include "ThreadPool.h"
 
-#include <boost/asio.hpp>
-#include <vector>
-#include <thread>
-class AsioServer
-{
-public:
-  explicit AsioServer(unsigned short port, size_t ioThreadsCount = 0, size_t workerThreadsCount = 0);
+class AsioServer {
+  public:
+    using tcp = boost::asio::ip::tcp;
+    using MessageCallback = std::function<void(const ConnectionPtr&, const std::string&)>;
+    using CloseCallback = std::function<void(const ConnectionPtr&)>;
 
-  void run();
+    explicit AsioServer(unsigned short port, std::size_t ioThreadsCount = 0, std::size_t workerThreadsCount = 0);
 
-  void stop();
+    void run();
+    void stop();
 
-private:
-  void do_accept();
+    void setMessageCallback(MessageCallback cb);
+    void setCloseCallback(CloseCallback cb);
 
-  boost::asio::io_context io_context_;
-  boost::asio::ip::tcp::acceptor acceptor_;
+    std::size_t connectionCount() const;
 
-  size_t io_Threads_{0};
-  std::vector<std::thread> threads_;
+  private:
+    void doAccept();
 
-  std::shared_ptr<ThreadPool> worker_pool_;
+  private:
+    boost::asio::io_context io_context_;
+    boost::asio::ip::tcp::acceptor acceptor_;
+
+    std::size_t ioThreadsCount_{0};
+    std::vector<std::thread> ioThreads_;
+    std::shared_ptr<ThreadPool> workerPool_;
+
+    ConnectionManager connectionManager_;
+
+    MessageCallback messageCallback_;
+    CloseCallback closeCallback_;
 };
