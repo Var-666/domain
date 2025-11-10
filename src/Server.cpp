@@ -125,7 +125,8 @@ void EpollServer::handleNewConnection(){
     }
 
     // 设置非阻塞
-    if(!setNonBlocking(client_fd)){
+    if (!setNonBlocking(connfd))
+    {
       close(client_fd);
       continue;
     }
@@ -135,7 +136,7 @@ void EpollServer::handleNewConnection(){
     ev.data.fd = connfd;
 
     if(epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, connfd, &ev) == -1){
-      std::cerr << "epoll_ctl(ADD) failed, client_fd: " << client_fd << ", errno: " << errno << std::endl;
+      std::cerr << "epoll_ctl(ADD) failed, client_fd: " << connfd << ", errno: " << errno << std::endl;
       close(client_fd);
       continue;
     }
