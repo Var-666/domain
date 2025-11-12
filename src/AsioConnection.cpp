@@ -5,19 +5,35 @@
 #include <memory>
 #include <string>
 
-AsioConnection::AsioConnection(boost::asio::io_context& io_context, tcp::socket socket)
-    : io_context_(io_context), socket_(std::move(socket)) {}
+AsioConnection::AsioConnection(boost::asio::io_context& io_context, tcp::socket socket, size_t maxSendBufferBytes)
+    : io_context_(io_context), socket_(std::move(socket)), maxSendBuf_(maxSendBufferBytes) {
+    readBuf_ = BufferPool::Instance().acquire(4096);
+    writeBuf_ = BufferPool::Instance().acquire(4096);
+}
 
 void AsioConnection::start() { doRead(); }
 
 void AsioConnection::send(const std::string& message) {
     auto self = shared_from_this();
-    boost::asio::post(io_context_, [this, self, message] {
-        bool writeInProgress = !writeQueue_.empty();
-        writeQueue_.push_back(message);
-        if (!writeInProgress) {
+    bool ok = true;
+
+    boost::asio::post(io_context_, [this, self, message, &ok] {
+        if (closing_) {
+            ok = false;
+            return;
+        }
+        // 背压：超过上限则触发策略（本例：直接关闭）
+        if (writeBuf_->readableBytes() + message.size() > maxSendBuf_) {
+            std::cerr << "Backpressure: send buffer exceeded. Closing connection.\n";
+            ok = false;
+            handleClose();
+            return;
+        }
+        writeBuf_->append(message);
+        if (!writing_) {
+            writing_ = true;
             doWrite();
-        };
+        }
     });
 }
 
@@ -28,13 +44,17 @@ void AsioConnection::close() {
 
 void AsioConnection::doRead() {
     auto self = shared_from_this();
-    socket_.async_read_some(boost::asio::buffer(readBuf_),
+
+    readBuf_->ensureWritableBytes(4096);
+    socket_.async_read_some(boost::asio::buffer(readBuf_->beginWrite(), readBuf_->writableBytes()),
                             [this, self](const boost::system::error_code& ec, std::size_t len) {
                                 if (!ec) {
                                     if (len > 0) {
-                                        std::string message(readBuf_.data(), len);
-                                        if (messageCallback_) {
-                                            messageCallback_(self, message);
+                                        readBuf_->hasWritten(len);
+
+                                        if (messageCallback_ && readBuf_->readableBytes() > 0) {
+                                            std::string chunk = readBuf_->retrieveAllAsString();
+                                            messageCallback_(self, chunk);
                                         }
                                     }
                                     doRead();
@@ -52,12 +72,21 @@ void AsioConnection::doRead() {
 void AsioConnection::doWrite() {
     auto self = shared_from_this();
 
-    boost::asio::async_write(socket_, boost::asio::buffer(writeQueue_.front()),
-                             [this, self](const boost::system::error_code& ec, std::size_t /*length*/) {
+    // 直接把 Buffer 的可读区交给 async_write
+    auto bytes = writeBuf_->readableBytes();
+    if (bytes == 0) {
+        writing_ = false;
+        return;
+    }
+
+    boost::asio::async_write(socket_, boost::asio::buffer(writeBuf_->peek(), bytes),
+                             [this, self](const boost::system::error_code& ec, std::size_t len) {
                                  if (!ec) {
-                                     writeQueue_.pop_front();
-                                     if (!writeQueue_.empty()) {
+                                     writeBuf_->retrieve(len);
+                                     if (writeBuf_->readableBytes() > 0) {
                                          doWrite();
+                                     } else {
+                                         writing_ = false;
                                      }
                                  } else {
                                      if (ec == boost::asio::error::operation_aborted) {
@@ -76,6 +105,9 @@ void AsioConnection::handleClose() {
     boost::system::error_code ec;
     socket_.shutdown(tcp::socket::shutdown_both, ec);
     socket_.close(ec);
+
+    readBuf_->retrieveAll();
+    writeBuf_->retrieveAll();
 
     if (closeCallback_) {
         closeCallback_(shared_from_this());

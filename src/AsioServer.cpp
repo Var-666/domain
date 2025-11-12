@@ -61,6 +61,7 @@ void AsioServer::doAccept() {
             auto connection = std::make_shared<AsioConnection>(io_context_, std::move(socket));
             connectionManager_.add(connection);
 
+            // 设置连接的回调
             connection->setMessageCallback([this](const ConnectionPtr& conn, const std::string& message) {
                 if (!messageCallback_) {
                     return;
@@ -74,6 +75,7 @@ void AsioServer::doAccept() {
                 });
             });
 
+            // 设置关闭回调
             connection->setCloseCallback([this](const ConnectionPtr& conn) {
                 connectionManager_.remove(conn);
                 if (closeCallback_) {

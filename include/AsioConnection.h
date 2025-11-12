@@ -1,9 +1,12 @@
 #pragma once
 
+#include <BufferPool.h>
+
 #include <boost/asio.hpp>
 #include <functional>
 #include <memory>
 
+#include "Buffer.h"
 #include "ThreadPool.h"
 
 class AsioConnection;
@@ -17,7 +20,8 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     using CloseCallback = std::function<void(const ConnectionPtr&)>;
 
     // 构造函数
-    explicit AsioConnection(boost::asio::io_context& io_context, tcp::socket socket);
+    explicit AsioConnection(boost::asio::io_context& io_context, tcp::socket socket,
+                            size_t maxSendBufferBytes = 4 * 1024 * 1024);
     void start();
     void send(const std::string& message);
     void close();
@@ -36,11 +40,13 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     boost::asio::io_context& io_context_;
     boost::asio::ip::tcp::socket socket_;
 
-    std::array<char, 1024> readBuf_;
-    std::deque<std::string> writeQueue_;
+    BufferPool::Ptr readBuf_;
+    BufferPool::Ptr writeBuf_;
 
     MessageCallback messageCallback_;
     CloseCallback closeCallback_;
 
     bool closing_{false};
+    bool writing_{false};
+    size_t maxSendBuf_{0};
 };
