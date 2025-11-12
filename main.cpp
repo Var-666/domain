@@ -1,25 +1,34 @@
 #include <iostream>
+#include <memory>
 
 #include "AsioServer.h"
+#include "Codec.h"
 
 int main() {
     try {
         AsioServer server(8080, 2, 4);
 
+        auto FrameCallback = [](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+            std::cout << "[onFrame] msgType=" << msgType << " body=" << body << "\n";
+            // 简单回显
+            LengthHeaderCodec::send(conn, msgType, "echo: " + body);
+        };
+
+        auto codec = std::make_shared<LengthHeaderCodec>(FrameCallback);
+
         // 注册业务回调：这里做一个简单的 echo + 打印
-        server.setMessageCallback([](const ConnectionPtr& conn, const std::string& msg) {
-            std::cout << "[onMessage] recv: " << msg << "\n";
+        server.setMessageCallback([codec](const ConnectionPtr& conn, const std::string& msg) {
             // 这里已经在 worker 线程里，可以做复杂逻辑
-            conn->send("echo: " + msg);
+            codec->onMessage(conn, msg);
         });
 
-        server.setCloseCallback([](const ConnectionPtr& /*conn*/) { std::cout << "[onClose] connection closed\n"; });
+        server.setCloseCallback([codec](const ConnectionPtr& conn) {
+            codec->onClose(conn);
+            std::cout << "[onClose] connection closed\n";
+        });
 
-        std::cout << "Asio server with Connection/ThreadPool started.\n";
         server.run();
     } catch (const std::exception& ex) {
         std::cerr << "Exception: " << ex.what() << "\n";
     }
-
-    std::cout << "Hello, World!" << std::endl;
 }

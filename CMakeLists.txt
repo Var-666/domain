@@ -13,7 +13,7 @@ if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
 endif()
 
-# 找 Boost（不再指定 COMPONENTS system）
+# 找 Boost
 find_package(Boost 1.74 REQUIRED)
 
 # 找线程库
@@ -26,6 +26,7 @@ file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
 set(MAIN_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
 add_executable(domain ${MAIN_SOURCE} ${CORE_SOURCES})
+add_executable(client clientTest.cpp ${CORE_SOURCES})
 
 # 头文件目录：你自己的 + Boost 的
 target_include_directories(domain
@@ -33,9 +34,19 @@ target_include_directories(domain
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${Boost_INCLUDE_DIRS}
 )
+target_include_directories(client
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${Boost_INCLUDE_DIRS}
+)
 
 # 链接库：只需要线程库就够了（Boost 这里只用头文件）
 target_link_libraries(domain
+    PRIVATE
+        Threads::Threads
+)
+
+target_link_libraries(client
     PRIVATE
         Threads::Threads
 )
