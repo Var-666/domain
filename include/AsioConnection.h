@@ -2,7 +2,9 @@
 
 #include <BufferPool.h>
 
+#include <atomic>
 #include <boost/asio.hpp>
+#include <chrono>
 #include <functional>
 #include <memory>
 
@@ -31,6 +33,10 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
 
     tcp::socket& socket();
 
+    void touch();
+
+    std::uint64_t lastActiveMs() const;
+
   private:
     void doRead();
     void doWrite();
@@ -49,4 +55,6 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     bool closing_{false};
     bool writing_{false};
     size_t maxSendBuf_{0};
+
+    std::atomic<std::uint64_t> lastActiveMs_{0};
 };

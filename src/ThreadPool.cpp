@@ -1,6 +1,7 @@
 #include "ThreadPool.h"
 
-ThreadPool::ThreadPool(size_t numThreads) : stopping_(false) {
+ThreadPool::ThreadPool(std::size_t numThreads, std::size_t maxQueueSize)
+    : stopping_(false), maxQueueSize_(maxQueueSize) {
     if (numThreads <= 0) {
         numThreads = std::thread::hardware_concurrency();
     }
@@ -25,6 +26,15 @@ void ThreadPool::shutdown() {
             worker.join();
     }
     workers_.clear();
+}
+
+std::size_t ThreadPool::maxQueueSize() const { return maxQueueSize_; }
+
+void ThreadPool::setMxQueueSize(std::size_t n) { maxQueueSize_ = n; }
+
+std::size_t ThreadPool::queueSize() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return tasks_.size();
 }
 
 void ThreadPool::workerLoop() {

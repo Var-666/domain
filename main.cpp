@@ -9,7 +9,7 @@ int main() {
         AsioServer server(8080, 2, 4);
 
         auto FrameCallback = [](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
-            std::cout << "[onFrame] msgType=" << msgType << " body=" << body << "\n";
+            std::cout << "[Server] msgType=" << msgType << " body=" << body << "\n";
             // 简单回显
             LengthHeaderCodec::send(conn, msgType, "echo: " + body);
         };

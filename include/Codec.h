@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "AsioConnection.h"
+#include "Metrics.h"
 
 // 长度头 + 消息类型的简单协议：
 // [4字节len][2字节msgType][Body...]

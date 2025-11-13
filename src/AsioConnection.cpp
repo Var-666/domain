@@ -11,7 +11,10 @@ AsioConnection::AsioConnection(boost::asio::io_context& io_context, tcp::socket 
     writeBuf_ = BufferPool::Instance().acquire(4096);
 }
 
-void AsioConnection::start() { doRead(); }
+void AsioConnection::start() {
+    touch();
+    doRead();
+}
 
 void AsioConnection::send(const std::string& message) {
     auto self = shared_from_this();
@@ -50,6 +53,7 @@ void AsioConnection::doRead() {
                             [this, self](const boost::system::error_code& ec, std::size_t len) {
                                 if (!ec) {
                                     if (len > 0) {
+                                        touch();
                                         readBuf_->hasWritten(len);
 
                                         if (messageCallback_ && readBuf_->readableBytes() > 0) {
@@ -116,3 +120,11 @@ void AsioConnection::handleClose() {
 
 void AsioConnection::setMessageCallback(MessageCallback cb) { messageCallback_ = std::move(cb); }
 void AsioConnection::setCloseCallback(CloseCallback cb) { closeCallback_ = std::move(cb); }
+
+void AsioConnection::touch() {
+    auto now = std::chrono::steady_clock::now().time_since_epoch();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    lastActiveMs_.store(static_cast<std::uint64_t>(ms), std::memory_order_relaxed);
+}
+
+std::uint64_t AsioConnection::lastActiveMs() const { return lastActiveMs_.load(std::memory_order_relaxed); }

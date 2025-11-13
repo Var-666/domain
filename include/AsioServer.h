@@ -8,6 +8,8 @@
 
 #include "AsioConnection.h"
 #include "ConnectionManager.h"
+#include "IdleConnectionManager.h"
+#include "Metrics.h"
 #include "ThreadPool.h"
 
 class AsioServer {
@@ -16,7 +18,7 @@ class AsioServer {
     using MessageCallback = std::function<void(const ConnectionPtr&, const std::string&)>;
     using CloseCallback = std::function<void(const ConnectionPtr&)>;
 
-    explicit AsioServer(unsigned short port, std::size_t ioThreadsCount = 0, std::size_t workerThreadsCount = 0);
+    explicit AsioServer(unsigned short port, std::size_t ioThreadsCount = 0, std::size_t workerThreadsCount = 0, std::uint64_t idleTimeoutMs = 60000);
 
     void run();
     void stop();
@@ -28,6 +30,8 @@ class AsioServer {
 
   private:
     void doAccept();
+    void scheduleMetricsReport();
+    void scheduleIdleCheck();
 
   private:
     boost::asio::io_context io_context_;
@@ -41,4 +45,9 @@ class AsioServer {
 
     MessageCallback messageCallback_;
     CloseCallback closeCallback_;
+
+    boost::asio::steady_timer metricsTimer_;  // metrics 定时器
+
+    IdleConnectionManager idleManager_;
+    boost::asio::steady_timer idleTimer_;
 };

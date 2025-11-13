@@ -60,7 +60,7 @@ class BufferPool {
     std::size_t maxCached_{4096};
 
     std::size_t defaultCapacity_{4096};
-    std::size_t shrinkThreshold_ = 1 << 20;
+    std::size_t shrinkThreshold_ = 1 << 20;  // 1MB：大于此容量的 Buffer 在归还时 shrink
 
     static constexpr std::size_t kTLMax{8};
     struct ThreadLocalCache {

@@ -5,9 +5,18 @@
 #include "AsioConnection.h"
 #include "ThreadPool.h"
 
-AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, size_t workerThreadsCount)
+namespace {
+    std::atomic<int> gInflight{0};
+    constexpr int kMaxInflight = 10000;
+}  // namespace
+
+AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, size_t workerThreadsCount,
+                       std::uint64_t idleTimeoutMs)
     : acceptor_(io_context_, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)),
-      ioThreadsCount_(ioThreadsCount) {
+      ioThreadsCount_(ioThreadsCount),
+      metricsTimer_(io_context_),
+      idleManager_(IdleConnectionManager::Duration(idleTimeoutMs)),
+      idleTimer_(io_context_) {
     if (ioThreadsCount_ <= 0) {
         ioThreadsCount_ = std::thread::hardware_concurrency();
     }
@@ -15,13 +24,15 @@ AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, size_t worker
         workerThreadsCount = std::thread::hardware_concurrency();
     }
     // 创建工作线程池
-    workerPool_ = std::make_shared<ThreadPool>(workerThreadsCount);
+    workerPool_ = std::make_shared<ThreadPool>(workerThreadsCount, 10000);
 
     std::cout << "AsioServer listen on 0.0.0.0:" << port << " | io_threads=" << ioThreadsCount_
-              << " | worker_threads=" << workerThreadsCount << std::endl;
+              << " | worker_threads=" << workerThreadsCount << " | idle_timeout_ms=" << idleTimeoutMs << "\n";
 
     // 开始接受连接
     doAccept();
+
+    scheduleIdleCheck();
 }
 
 void AsioServer::run() {
@@ -59,28 +70,58 @@ void AsioServer::doAccept() {
     acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket socket) {
         if (!ec) {
             auto connection = std::make_shared<AsioConnection>(io_context_, std::move(socket));
+
             connectionManager_.add(connection);
+            idleManager_.add(connection);
+
+            // connection 计数 +1
+            MetricsRegistry::Instance().connections().inc();
 
             // 设置连接的回调
             connection->setMessageCallback([this](const ConnectionPtr& conn, const std::string& message) {
                 if (!messageCallback_) {
                     return;
                 }
+                // 全局 in - flight 限制
+                int cur = gInflight.fetch_add(1, std::memory_order_relaxed);
+                if (cur >= kMaxInflight) {
+                    gInflight.fetch_sub(1, std::memory_order_relaxed);
+                    MetricsRegistry::Instance().totalErrors().inc();
+                    std::cerr << "[Overload] too many in-flight requests, drop message\n";
+                    return;
+                }
+
                 // 将消息处理任务提交给工作线程池
                 auto weak = std::weak_ptr<AsioConnection>(conn);
-                workerPool_->submit([this, weak, message]() {
-                    if (auto shared = weak.lock()) {
-                        messageCallback_(shared, message);
-                    }
-                });
+                try {
+                    workerPool_->submit([this, weak, message]() {
+                        if (auto shared = weak.lock()) {
+                            try {
+                                messageCallback_(shared, message);
+                            } catch (const std::exception& ex) {
+                                std::cerr << "userMessageCallback exception: " << ex.what() << "\n";
+                            } catch (...) {
+                                std::cerr << "userMessageCallback unknown exception\n";
+                            }
+                        }
+                        gInflight.fetch_sub(1, std::memory_order_relaxed);
+                    });
+                } catch (const std::exception& ex) {
+                    gInflight.fetch_sub(1, std::memory_order_relaxed);
+                    MetricsRegistry::Instance().totalErrors().inc();
+                    std::cerr << "[Overload] ThreadPool submit failed: " << ex.what() << "\n";
+                }
             });
 
             // 设置关闭回调
             connection->setCloseCallback([this](const ConnectionPtr& conn) {
                 connectionManager_.remove(conn);
+                idleManager_.remove(conn);
+                // MetricsRegistry::Instance().connections().inc(-1);
                 if (closeCallback_) {
                     closeCallback_(conn);
                 }
+                scheduleMetricsReport();
             });
 
             connection->start();
@@ -88,6 +129,35 @@ void AsioServer::doAccept() {
             std::cerr << "Accept error: " << ec.message() << std::endl;
         }
         doAccept();
+    });
+}
+
+void AsioServer::scheduleMetricsReport() {
+    using namespace std::chrono_literals;
+    metricsTimer_.expires_after(5s);
+    metricsTimer_.async_wait([this](const boost::system::error_code& ec) {
+        if (!ec) {
+            MetricsRegistry::Instance().printSnapshot(std::cout);
+        } else {
+            if (ec != boost::asio::error::operation_aborted) {
+                std::cerr << "metrics_timer error: " << ec.message() << "\n";
+            }
+        }
+    });
+}
+
+void AsioServer::scheduleIdleCheck() {
+    using namespace std::chrono_literals;
+    idleTimer_.expires_after(10s);
+    idleTimer_.async_wait([this](const boost::system::error_code& ec) {
+        if (!ec) {
+            idleManager_.check();
+            scheduleIdleCheck();
+        } else {
+            if (ec != boost::asio::error::operation_aborted) {
+                std::cerr << "idle_timer error: " << ec.message() << "\n";
+            }
+        }
     });
 }
 

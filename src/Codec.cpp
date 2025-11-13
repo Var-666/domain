@@ -26,6 +26,8 @@ void LengthHeaderCodec::processBuffer(const ConnectionPtr& conn, std::string& bu
         uint32_t len = decodeUint32(buffer.data());
         if (len < 2) {
             // 协议错误：len 至少包括 2字节 msgType
+            MetricsRegistry::Instance().totalErrors().inc();
+            
             buffer.clear();
             return;  // 非法长度，清空缓存
         }
@@ -47,7 +49,25 @@ void LengthHeaderCodec::processBuffer(const ConnectionPtr& conn, std::string& bu
         buffer.erase(0, totalLen);  // 移除已处理的数据
 
         if (frameCallback_) {
-            frameCallback_(conn, msgType, body);
+            auto start = std::chrono::steady_clock::now();
+
+            try {
+                frameCallback_(conn, msgType, body);
+                MetricsRegistry::Instance().totalFrames().inc();  // ✅ 真正解出了一帧，再 +1
+            } catch (const std::exception& ex) {
+                MetricsRegistry::Instance().totalErrors().inc();
+                std::cerr << "[Codec] FrameCallback exception: " << ex.what() << "\n";
+                // 根据需求决定是否继续 throw，这里建议先不抛，免得上层再统计一遍
+                // throw;
+            } catch (...) {
+                MetricsRegistry::Instance().totalErrors().inc();
+                std::cerr << "[Codec] FrameCallback unknown exception\n";
+                // throw;
+            }
+
+            auto end = std::chrono::steady_clock::now();
+            double ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
+            MetricsRegistry::Instance().frameLatency().observe(ms);  // ✅ 统计真正“处理一帧”的耗时
         }
     }
 }
