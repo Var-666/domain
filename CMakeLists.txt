@@ -13,11 +13,10 @@ if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
 endif()
 
-# 找 Boost
 find_package(Boost 1.74 REQUIRED)
-
-# 找线程库
 find_package(Threads REQUIRED)
+find_package(Lua REQUIRED)
+find_package(spdlog REQUIRED)
 
 # 源文件
 file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS
@@ -33,20 +32,25 @@ target_include_directories(domain
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${Boost_INCLUDE_DIRS}
+        ${LUA_INCLUDE_DIR}
 )
 target_include_directories(client
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${Boost_INCLUDE_DIRS}
+        ${LUA_INCLUDE_DIR}
 )
 
-# 链接库：只需要线程库就够了（Boost 这里只用头文件）
 target_link_libraries(domain
     PRIVATE
         Threads::Threads
+        ${LUA_LIBRARIES}
+        spdlog::spdlog
 )
 
 target_link_libraries(client
     PRIVATE
         Threads::Threads
+        ${LUA_LIBRARIES}
+        spdlog::spdlog
 )

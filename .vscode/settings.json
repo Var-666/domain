@@ -40,6 +40,8 @@
     "vector": "cpp",
     "algorithm": "cpp",
     "__split_buffer": "cpp",
-    "list": "cpp"
+    "list": "cpp",
+    "fstream": "cpp",
+    "cstddef": "cpp"
   }
 }

@@ -121,6 +121,8 @@ void AsioConnection::handleClose() {
 void AsioConnection::setMessageCallback(MessageCallback cb) { messageCallback_ = std::move(cb); }
 void AsioConnection::setCloseCallback(CloseCallback cb) { closeCallback_ = std::move(cb); }
 
+boost::asio::ip::tcp::socket& AsioConnection::socket() { return socket_; }
+
 void AsioConnection::touch() {
     auto now = std::chrono::steady_clock::now().time_since_epoch();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();

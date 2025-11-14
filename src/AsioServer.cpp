@@ -1,5 +1,7 @@
 #include "AsioServer.h"
 
+#include <spdlog/spdlog.h>
+
 #include <iostream>
 
 #include "AsioConnection.h"
@@ -26,9 +28,6 @@ AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, size_t worker
     // 创建工作线程池
     workerPool_ = std::make_shared<ThreadPool>(workerThreadsCount, 10000);
 
-    std::cout << "AsioServer listen on 0.0.0.0:" << port << " | io_threads=" << ioThreadsCount_
-              << " | worker_threads=" << workerThreadsCount << " | idle_timeout_ms=" << idleTimeoutMs << "\n";
-
     // 开始接受连接
     doAccept();
 
@@ -42,7 +41,7 @@ void AsioServer::run() {
             try {
                 io_context_.run();
             } catch (const std::exception& e) {
-                std::cerr << "IO thread exception: " << e.what() << std::endl;
+                SPDLOG_ERROR("IO thread exception: {}", e.what());
             }
         });
     }
@@ -87,7 +86,7 @@ void AsioServer::doAccept() {
                 if (cur >= kMaxInflight) {
                     gInflight.fetch_sub(1, std::memory_order_relaxed);
                     MetricsRegistry::Instance().totalErrors().inc();
-                    std::cerr << "[Overload] too many in-flight requests, drop message\n";
+                    SPDLOG_ERROR("too many in-flight requests, drop message");
                     return;
                 }
 
@@ -99,9 +98,9 @@ void AsioServer::doAccept() {
                             try {
                                 messageCallback_(shared, message);
                             } catch (const std::exception& ex) {
-                                std::cerr << "userMessageCallback exception: " << ex.what() << "\n";
+                                SPDLOG_ERROR("userMessageCallback exception:{} ", ex.what());
                             } catch (...) {
-                                std::cerr << "userMessageCallback unknown exception\n";
+                                SPDLOG_ERROR("userMessageCallback unknown exception");
                             }
                         }
                         gInflight.fetch_sub(1, std::memory_order_relaxed);
@@ -109,7 +108,7 @@ void AsioServer::doAccept() {
                 } catch (const std::exception& ex) {
                     gInflight.fetch_sub(1, std::memory_order_relaxed);
                     MetricsRegistry::Instance().totalErrors().inc();
-                    std::cerr << "[Overload] ThreadPool submit failed: " << ex.what() << "\n";
+                    SPDLOG_ERROR("ThreadPool submit failed: {}", ex.what());
                 }
             });
 
@@ -126,7 +125,7 @@ void AsioServer::doAccept() {
 
             connection->start();
         } else {
-            std::cerr << "Accept error: " << ec.message() << std::endl;
+            SPDLOG_ERROR("Accept error: {}", ec.message());
         }
         doAccept();
     });
@@ -140,7 +139,7 @@ void AsioServer::scheduleMetricsReport() {
             MetricsRegistry::Instance().printSnapshot(std::cout);
         } else {
             if (ec != boost::asio::error::operation_aborted) {
-                std::cerr << "metrics_timer error: " << ec.message() << "\n";
+                SPDLOG_ERROR("metrics_timer error:{}", ec.message());
             }
         }
     });
@@ -155,7 +154,7 @@ void AsioServer::scheduleIdleCheck() {
             scheduleIdleCheck();
         } else {
             if (ec != boost::asio::error::operation_aborted) {
-                std::cerr << "idle_timer error: " << ec.message() << "\n";
+                SPDLOG_ERROR("idle_timer error: {}", ec.message());
             }
         }
     });
