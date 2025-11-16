@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 struct ServerConfig {
     unsigned short port = 8080;
@@ -27,6 +28,12 @@ struct LogConfig {
     std::size_t fileMaxFiles = 5;
 };
 
+struct MsgLimitConfig {
+    bool enabled = false;
+    int maxQps = 0;
+    int maxConcurrent = 0;
+};
+
 class Config {
   public:
     static Config& Instance();
@@ -35,6 +42,7 @@ class Config {
 
     const ServerConfig& server() const;
     const LogConfig& log() const;
+    const std::unordered_map<std::uint16_t, MsgLimitConfig>& msgLimits() const;
 
   private:
     Config() = default;
@@ -44,4 +52,5 @@ class Config {
   private:
     ServerConfig serverCfg_;
     LogConfig logCfg_;
+    std::unordered_map<std::uint16_t, MsgLimitConfig> msgLimitsCfg_;
 };

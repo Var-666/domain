@@ -34,6 +34,26 @@ config = {
       maxSizeMb = 100,         -- 单个文件最大 MB
       maxFiles = 5,            -- 最多保留几个轮转日志
     },
+  },
+
+  -- 按 msgType 的限流配置
+  messageLimits = {
+    -- 心跳：一般不单独限流（enabled=false）
+    [1] = {
+      enabled = false,
+    },
+    -- echo：示例，限制 QPS 和并发
+    [2] = {
+      enabled = true,
+      maxQps = 10000,
+      maxConcurrent = 1000,
+    },
+    -- 以后你有重型请求，比如排行榜查询，可以限得更严
+    [200] = {
+      enabled = true,
+      maxQps = 100,
+      maxConcurrent = 10,
+    } 
   }
 
 }

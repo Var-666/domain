@@ -7,6 +7,11 @@
 #include "Codec.h"
 #include "Config.h"
 #include "Logging.h"
+#include "MessageLimiter.h"
+#include "MessageRouter.h"
+#include "Middlewares.h"
+#include "Routes/CoreRoutes.h"
+#include "Routes/RouteRegistry.h"
 
 int main() {
     // 1. 加载 Lua 配置
@@ -22,17 +27,28 @@ int main() {
     try {
         AsioServer server(sc.port, sc.ioThreadsCount, sc.workerThreadsCount, sc.IdleTimeoutMs);
 
-        auto FrameCallback = [](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
-            std::cout << "[Server] msgType=" << msgType << " body=" << body << "\n";
-            // 简单回显
-            LengthHeaderCodec::send(conn, msgType, "echo: " + body);
+        auto router = std::make_shared<MessageRouter>();
+
+        // 统一中间件注册
+        RegisterMiddlewares(*router, cfg);
+
+        // 路由集中注册
+        RouteRegistry routes;
+        CoreRoutes::Register(routes);
+        routes.applyTo(*router);
+
+        router->setDefaultHandler([](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+            SPDLOG_WARN("Unknown msgType={} bodySize={}", msgType, body.size());
+        });
+
+        //  Router 接入 Codec/Server（跟你现在的用法一致）
+        auto frameCb = [router](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+            router->onMessage(conn, msgType, body);
         };
+        auto codec = std::make_shared<LengthHeaderCodec>(frameCb);
 
-        auto codec = std::make_shared<LengthHeaderCodec>(FrameCallback);
-
-        // 注册业务回调：这里做一个简单的 echo + 打印
+        // 注册业务回调
         server.setMessageCallback([codec](const ConnectionPtr& conn, const std::string& msg) {
-            // 这里已经在 worker 线程里，可以做复杂逻辑
             codec->onMessage(conn, msg);
         });
 

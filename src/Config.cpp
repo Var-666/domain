@@ -49,6 +49,8 @@ const ServerConfig& Config::server() const { return serverCfg_; }
 
 const LogConfig& Config::log() const { return logCfg_; }
 
+const std::unordered_map<std::uint16_t, MsgLimitConfig>& Config::msgLimits() const { return msgLimitsCfg_; }
+
 bool Config::parseLuaConfig(void* pL) {
     lua_State* L = static_cast<lua_State*>(pL);
 
@@ -142,6 +144,42 @@ bool Config::parseLuaConfig(void* pL) {
         lua_pop(L, 1);  // pop file
     }
     lua_pop(L, 1);
+
+    // ==== message_limits ====
+    lua_getfield(L, -1, "messageLimits");  // stack: ..., config, message_limits
+    if (lua_istable(L, -1)) {
+        // 遍历 message_limits 表：key = msgType, value = table
+        lua_pushnil(L);  // 初始 key
+        while (lua_next(L, -2) != 0) {
+            // stack: ..., message_limits, key, value
+            if (!lua_isinteger(L, -2) || !lua_istable(L, -1)) {
+                lua_pop(L, 1);  // pop value
+                continue;
+            }
+
+            std::int64_t msgType = lua_tointeger(L, -2);
+            MsgLimitConfig msgLimitsCfg;
+
+            // enabled
+            lua_getfield(L, -1, "enabled");
+            if (lua_isboolean(L, -1)) {
+                msgLimitsCfg.enabled = lua_toboolean(L, -1);
+            }
+            lua_pop(L, 1);
+
+            msgLimitsCfg.maxQps = static_cast<int>(getIntField(L, "maxQps", msgLimitsCfg.maxQps));
+            msgLimitsCfg.maxConcurrent = static_cast<int>(getIntField(L, "maxConcurrent", msgLimitsCfg.maxConcurrent));
+
+            if (msgType >= 0 && msgType <= 0xFFFF) {
+                msgLimitsCfg_[static_cast<std::uint16_t>(msgType)] = msgLimitsCfg;
+            }
+
+            lua_pop(L, 1);  // pop value, 保留 key 供下次 lua_next 使用
+        }
+    } else {
+        std::cerr << "[Config] 'config.message_limits' not found or not a table, use defaults\n";
+    }
+    lua_pop(L, 1);  // pop message_limits
 
     // 弹出 config
     lua_pop(L, 1);

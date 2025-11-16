@@ -28,13 +28,19 @@ void ThreadPool::shutdown() {
     workers_.clear();
 }
 
-std::size_t ThreadPool::maxQueueSize() const { return maxQueueSize_; }
+std::size_t ThreadPool::maxQueueSize() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return maxQueueSize_;
+}
 
-void ThreadPool::setMxQueueSize(std::size_t n) { maxQueueSize_ = n; }
+void ThreadPool::setMxQueueSize(std::size_t n) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    maxQueueSize_ = n;
+}
 
 std::size_t ThreadPool::queueSize() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return tasks_.size();
+    return totalQueueSize_;
 }
 
 void ThreadPool::workerLoop() {
@@ -42,12 +48,58 @@ void ThreadPool::workerLoop() {
         std::function<void()> task;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait(lock, [this]() { return stopping_ || !tasks_.empty(); });
-            if (stopping_ && tasks_.empty())
+            cv_.wait(lock, [this]() { return stopping_ || totalQueueSize_ > 0; });
+            if (stopping_ && totalQueueSize_ == 0)
                 return;
-            task = std::move(tasks_.front());
-            tasks_.pop();
+
+            if (!highQ_.empty()) {
+                task = std::move(highQ_.front());
+                highQ_.pop();
+            } else if (!normalQ_.empty()) {
+                task = std::move(normalQ_.front());
+                normalQ_.pop();
+            } else if (!lowQ_.empty()) {
+                task = std::move(lowQ_.front());
+                lowQ_.pop();
+            } else {
+                // 理论上 totalQueueSize_ > 0 时不应发生
+                continue;
+            }
+
+            --totalQueueSize_;
         }
         task();
     }
+}
+
+bool ThreadPool::handleOverflow(TaskPriority incomingPri) {
+    if (maxQueueSize_ == 0)
+        return true;
+
+    auto dropOneFrom = [this](std::queue<std::function<void()>>& q) -> bool {
+        if (!q.empty()) {
+            q.pop();
+            --totalQueueSize_;
+            // 这里可选：记录 "丢弃任务" 的 Metrics 或日志
+            return true;
+        }
+        return false;
+    };
+
+    switch (incomingPri) {
+        case TaskPriority::Low:
+            return false;
+        case TaskPriority::Normal:
+            if (dropOneFrom(lowQ_)) {
+                return true;
+            }
+            return false;
+        case TaskPriority::High:
+            if (dropOneFrom(lowQ_))
+                return true;
+            if (dropOneFrom(normalQ_))
+                return true;
+            return false;
+    }
+    return false;
 }
