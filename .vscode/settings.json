@@ -42,6 +42,7 @@
     "__split_buffer": "cpp",
     "list": "cpp",
     "fstream": "cpp",
-    "cstddef": "cpp"
+    "cstddef": "cpp",
+    "unordered_set": "cpp"
   }
 }

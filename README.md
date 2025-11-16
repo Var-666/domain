@@ -1,21 +1,22 @@
 # Simple Boost.Asio Echo Server
 
-> 轻量级的异步 TCP 服务骨架，集成了配置、日志、限流、监控等生产级模块，业务层通过回调快速接入。
+> 轻量级的异步 TCP 服务骨架，集成配置/日志/限流/监控/信号优雅停机等生产要素；业务层通过路由 + 中间件快速接入。
 
 ---
 
 ## 🔍 功能亮点
 
-- **异步连接与线程池**：基于 Boost.Asio + `ThreadPool`，通过 `ConnectionManager`/`IdleConnectionManager` 做连接生命周期管理与空闲清理。
-- **协议层**：`LengthHeaderCodec` 负责长度前缀 + 消息类型的解码/编码，方便插入任意业务逻辑（示例为 echo）。
-- **运维友好**：Lua 配置、spdlog 异步日志（Console + Rotating File）、`MetricsRegistry` 指标打印，便于调参和监控状态。
+- **异步 I/O + 线程池**：Boost.Asio 驱动，`ConnectionManager`/`IdleConnectionManager` 管理连接生命周期，`ThreadPool` 支持优先级队列。
+- **协议与路由**：`LengthHeaderCodec` 负责帧编解码；`MessageRouter`+`RouteRegistry` 按 `msgType` 分发，支持中间件链（限流/日志/鉴权占位）。
+- **按消息限流**：`MessageLimiter` 从 Lua 配置读取 per-msgType QPS/并发上限，超限可计错并丢弃；可在 middleware 层定制回执。
+- **运维友好**：Lua 配置、spdlog 异步日志（Console + Rotating File）、`MetricsRegistry` 指标打印，CrashHandler 捕获致命信号输出回溯，信号监听支持优雅停机。
 
 ## 📁 目录一览
 
 | 路径 | 说明 |
 | --- | --- |
-| `src/` | 各模块实现：AsioServer/AsioConnection/Config/Codec/Logging 等。 |
-| `include/` | 公共头，包含 Buffer、BufferPool、ThreadPool、Metrics、ConnectionManager 等。 |
+| `src/` | 核心实现：AsioServer/AsioConnection/Config/Codec/Logging/Router/Middlewares/InitServer 等。 |
+| `include/` | 公共头：Buffer/ThreadPool/Metrics/ConnectionManager/MessageRouter/MessageLimiter/RouteRegistry 等。 |
 | `config.lua` | Lua 配置文件，分 server/threadPool/limits/log 四个区块。 |
 | `clientTest.cpp` | 简易客户端，用于手动验证协议或压力测试。 |
 
@@ -32,17 +33,18 @@
    ./build/server
    ```
    默认会加载工程根目录下的 `config.lua`。
-4. **验证协议**：使用 `clientTest.cpp`、`netcat` 或其他客户端发送长度帧（[4B len][2B msgType][body]），服务器会 echo 并在 stdout 输出日志。
+4. **验证协议**：使用 `clientTest.cpp`、`netcat` 或其他客户端发送长度帧（[4B len][2B msgType][body]），服务器会 echo 并在 stdout/log 输出。
 
 ## 🛠️ 可配置项（参考 `config.lua`）
 
-- `server.port`、`ioThreadsCount`、`workerThreadsCount`：控制监听端口与线程数量。
-- `threadPool.maxQueueSize`：限制后台任务队列最大长度，超出会在 `ThreadPool::submit` 抛出异常。
-- `limits.maxInflight`, `maxSendBufferBytes`：全局的 in-flight 限流与单连接发送缓冲背压。
-- `log`：`level`/`asyncQueueSize`/`flushIntervalMs` + console/file 的开关和文件策略。
+- `server.*`：端口、io/worker 线程数、空闲超时、队列长度。
+- `threadPool.maxQueueSize`：后台任务队列上限。
+- `limits.*`：全局 in-flight 限流、单连接发送缓冲上限。
+- `log.*`：日志级别、异步队列、flush 周期、console/file 开关与策略。
+- `messageLimits.{msgType}`：按消息类型的限流（enabled/maxQps/maxConcurrent）。
 
 ## 🧠 后续建议
 
-1. 替换 `LengthHeaderCodec` 的 `FrameCallback` 为真实业务处理，或在 `server.setMessageCallback` 中接入 protobuf/json/数据库等。
-2. 把配置项与 `ThreadPool`、限流等真正联动，增加热加载/命令行覆盖优先级。
-3. 撰写简易单测或集成测试（例如启动 server + 连接发送 frame）并纳入 CI，提升回归保障。
+1. 利用 `RouteRegistry` 拆分业务模块，`MessageRouter` 中间件加入鉴权/监控上报、限流回执。
+2. 让配置驱动更多策略（线程池扩缩容、路由开关、限流回执），并可选支持热加载。
+3. 编写集成测试（启动 server + clientTest 心跳/echo/未知命令）并接入 CI，验证路由/限流/优雅停机行为。

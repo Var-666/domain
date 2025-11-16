@@ -18,15 +18,21 @@ class AsioServer {
     using MessageCallback = std::function<void(const ConnectionPtr&, const std::string&)>;
     using CloseCallback = std::function<void(const ConnectionPtr&)>;
 
-    explicit AsioServer(unsigned short port, std::size_t ioThreadsCount = 0, std::size_t workerThreadsCount = 0, std::uint64_t idleTimeoutMs = 60000);
+    explicit AsioServer(unsigned short port, std::size_t ioThreadsCount = 0, std::size_t workerThreadsCount = 0,
+                        std::uint64_t idleTimeoutMs = 60000);
 
     void run();
     void stop();
+
+    void stopAccept();
+    void closeAllConnections();
 
     void setMessageCallback(MessageCallback cb);
     void setCloseCallback(CloseCallback cb);
 
     std::size_t connectionCount() const;
+
+    boost::asio::io_context& ioContext();
 
   private:
     void doAccept();

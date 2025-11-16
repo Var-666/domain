@@ -59,13 +59,35 @@ void AsioServer::run() {
 }
 
 void AsioServer::stop() {
-    io_context_.stop();
+    stopAccept();
+
     if (workerPool_) {
         workerPool_->shutdown();
     }
+    io_context_.stop();
+}
+
+void AsioServer::stopAccept() {
+    boost::system::error_code ec;
+    acceptor_.cancel(ec);
+    acceptor_.close(ec);
+    if (ec) {
+        SPDLOG_WARN("stopAccept error: {}", ec.message());
+    } else {
+        SPDLOG_INFO("stopAccept: new connections will no longer be accepted");
+    }
+}
+
+void AsioServer::closeAllConnections() {
+    SPDLOG_INFO("closeAllConnections: closing {} connections", connectionManager_.size());
+    connectionManager_.forEach([](const ConnectionPtr& c) { c->close(); });
 }
 
 void AsioServer::doAccept() {
+    if (!acceptor_.is_open()) {
+        return;
+    }
+
     acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket socket) {
         if (!ec) {
             auto connection = std::make_shared<AsioConnection>(io_context_, std::move(socket));
@@ -125,6 +147,9 @@ void AsioServer::doAccept() {
 
             connection->start();
         } else {
+            if (ec == boost::asio::error::operation_aborted || !acceptor_.is_open()) {
+                return;  // 停止接受时触发，直接退出
+            }
             SPDLOG_ERROR("Accept error: {}", ec.message());
         }
         doAccept();
@@ -165,3 +190,5 @@ void AsioServer::setMessageCallback(MessageCallback cb) { messageCallback_ = std
 void AsioServer::setCloseCallback(CloseCallback cb) { closeCallback_ = std::move(cb); }
 
 std::size_t AsioServer::connectionCount() const { return connectionManager_.size(); }
+
+boost::asio::io_context& AsioServer::ioContext() { return io_context_; }

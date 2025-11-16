@@ -67,9 +67,6 @@ namespace Logging {
         spdlog::set_level(ParseLevel(cfg.level));
 
         spdlog::flush_every(std::chrono::milliseconds(cfg.flushIntervalMs));
-
-        SPDLOG_INFO("Logging initialized. level={}, async_queue_size={}, flush_interval_ms={}", cfg.level,
-                    cfg.asyncQueueSize, cfg.flushIntervalMs);
     }
     void shutdown() { spdlog::shutdown(); }
 

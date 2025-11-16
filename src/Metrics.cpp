@@ -75,10 +75,10 @@ Counter& MetricsRegistry::totalErrors() { return totalErrors_; }
 LatencyMetric& MetricsRegistry::frameLatency() { return frameLatency_; }
 
 void MetricsRegistry::printSnapshot(std::ostream& os) const {
-    os << "==== Metrics =======================================================\n";
+    os << "==== Metrics =====================================================================================\n";
     os << "connections=" << connections_.value() << "\n";
     os << "totalFrames=" << totalFrames_.value() << "\n";
     os << "totalErrors=" << totalErrors_.value() << "\n";
     frameLatency_.print("frameLatency", os);
-    os << "\n====================================================================\n";
+    os << "\n==================================================================================================\n";
 }
