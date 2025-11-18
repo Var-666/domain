@@ -23,6 +23,16 @@ static std::int64_t getIntField(lua_State* L, const char* key, std::int64_t defa
     return v;
 }
 
+static bool getBoolField(lua_State* L, const char* key, bool def) {
+    lua_getfield(L, -1, key);
+    bool v = def;
+    if (lua_isboolean(L, -1)) {
+        v = lua_toboolean(L, -1) != 0;
+    }
+    lua_pop(L, 1);
+    return v;
+}
+
 bool Config::loadFromFile(const std::string& path) {
     lua_State* L = luaL_newstate();
     if (!L) {
@@ -48,6 +58,8 @@ bool Config::loadFromFile(const std::string& path) {
 const ServerConfig& Config::server() const { return serverCfg_; }
 
 const LogConfig& Config::log() const { return logCfg_; }
+
+const ThreadPoolConfig Config::threadPool() const { return threadPoolCfg_; }
 
 const std::unordered_map<std::uint16_t, MsgLimitConfig>& Config::msgLimits() const { return msgLimitsCfg_; }
 
@@ -76,10 +88,22 @@ bool Config::parseLuaConfig(void* pL) {
     }
     lua_pop(L, 1);  // pop server
 
-    // ==== thread_pool ====
-    lua_getfield(L, -1, "threadPool");  // stack: ..., config, thread_pool
+    // ==== thread_pool ====（新加）
+    lua_getfield(L, -1, "thread_pool");
     if (lua_istable(L, -1)) {
-        serverCfg_.maxQueueSize = static_cast<std::size_t>(getIntField(L, "max_queue_size", serverCfg_.maxQueueSize));
+        threadPoolCfg_.minThreads = static_cast<std::size_t>(getIntField(L, "minThreads", threadPoolCfg_.minThreads));
+        threadPoolCfg_.maxThreads = static_cast<std::size_t>(getIntField(L, "maxThreads", threadPoolCfg_.maxThreads));
+        threadPoolCfg_.maxQueueSize =
+            static_cast<std::size_t>(getIntField(L, "maxQueueSize", threadPoolCfg_.maxQueueSize));
+
+        threadPoolCfg_.autoTune = getBoolField(L, "autoTune", threadPoolCfg_.autoTune);
+
+        threadPoolCfg_.highWatermark =
+            static_cast<std::size_t>(getIntField(L, "highWatermark", threadPoolCfg_.highWatermark));
+        threadPoolCfg_.lowWatermark =
+            static_cast<std::size_t>(getIntField(L, "lowWatermark", threadPoolCfg_.lowWatermark));
+        threadPoolCfg_.upThreshold = static_cast<int>(getIntField(L, "upThreshold", threadPoolCfg_.upThreshold));
+        threadPoolCfg_.downThreshold = static_cast<int>(getIntField(L, "downThreshold", threadPoolCfg_.downThreshold));
     } else {
         std::cerr << "[Config] 'config.thread_pool' not found or not a table, use defaults\n";
     }

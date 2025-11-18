@@ -15,6 +15,19 @@ struct ServerConfig {
     std::size_t maxSendBufferBytes = 4 * 1024 * 1024;
 };
 
+struct ThreadPoolConfig {
+    std::size_t minThreads = 2;
+    std::size_t maxThreads = 8;
+    std::size_t maxQueueSize = 10000;
+
+    bool autoTune = false;
+
+    std::size_t highWatermark = 2000;
+    std::size_t lowWatermark = 0;
+    int upThreshold = 3;
+    int downThreshold = 10;
+};
+
 struct LogConfig {
     std::string level = "info";
     std::size_t asyncQueueSize = 8192;
@@ -42,6 +55,7 @@ class Config {
 
     const ServerConfig& server() const;
     const LogConfig& log() const;
+    const ThreadPoolConfig threadPool() const;
     const std::unordered_map<std::uint16_t, MsgLimitConfig>& msgLimits() const;
 
   private:
@@ -52,5 +66,6 @@ class Config {
   private:
     ServerConfig serverCfg_;
     LogConfig logCfg_;
+    ThreadPoolConfig threadPoolCfg_;
     std::unordered_map<std::uint16_t, MsgLimitConfig> msgLimitsCfg_;
 };

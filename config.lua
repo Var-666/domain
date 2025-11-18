@@ -10,6 +10,16 @@ config = {
   -- 线程池限流：控制任务队列最多能积压多少任务
   threadPool = {
     maxQueueSize = 10000,      -- 0 表示不限制，其他为硬限制（超过会抛异常）
+
+    minThreads = 2,
+    maxThreads = 8,
+
+    autoTune = true,
+
+    highWatermark = maxQueueSize * 0.7,
+    lowWatermark = maxQueueSize * 0.1,
+    upThreshold = 3,
+    downThreshold = 10,
   },
 
   -- 全局限制

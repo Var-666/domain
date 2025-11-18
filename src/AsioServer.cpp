@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "AsioConnection.h"
+#include "Config.h"
 #include "ThreadPool.h"
 
 namespace {
@@ -19,14 +20,24 @@ AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, size_t worker
       metricsTimer_(io_context_),
       idleManager_(IdleConnectionManager::Duration(idleTimeoutMs)),
       idleTimer_(io_context_) {
+        
     if (ioThreadsCount_ <= 0) {
         ioThreadsCount_ = std::thread::hardware_concurrency();
     }
     if (workerThreadsCount <= 0) {
         workerThreadsCount = std::thread::hardware_concurrency();
     }
+
+    const auto& tpc = Config::Instance().threadPool();
     // 创建工作线程池
-    workerPool_ = std::make_shared<ThreadPool>(workerThreadsCount, 10000);
+    workerPool_ = std::make_shared<ThreadPool>(workerThreadsCount, tpc.maxQueueSize, tpc.minThreads, tpc.maxThreads);
+
+    // 开启自动伸缩（也可以通过配置开关）
+    workerPool_->setAutoTuneParams(tpc.highWatermark, tpc.lowWatermark, tpc.upThreshold, tpc.downThreshold);
+
+    if (tpc.autoTune) {
+        workerPool_->enableAutoTune(true);
+    }
 
     // 开始接受连接
     doAccept();

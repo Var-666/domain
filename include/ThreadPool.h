@@ -15,7 +15,8 @@ enum class TaskPriority {
 
 class ThreadPool {
   public:
-    explicit ThreadPool(std::size_t numThreads, std::size_t maxQueueSize = 0);
+    explicit ThreadPool(std::size_t numThreads, std::size_t maxQueueSize = 0, std::size_t minThreads = 0,
+                        std::size_t maxThreads = 0);
     ~ThreadPool();
 
     // 提交任务到线程池
@@ -31,12 +32,27 @@ class ThreadPool {
     void setMxQueueSize(std::size_t n);
 
     std::size_t queueSize() const;
+    std::size_t workerCount() const;
+    std::size_t liveWorkerCount() const;
+
+    // 动态调整线程数：newCount 会被 clamp 到 [minThreads_, maxThreads_]
+    void resize(std::size_t newCount);
+
+    // 启用/关闭自动动态伸缩（简单策略）
+    void enableAutoTune(bool enable);
+
+    // 可以根据需要修改这些参数（也可以从配置里读取）
+    void setAutoTuneParams(std::size_t highWatermark, std::size_t lowWatermark, int upThreshold, int downThreshold);
 
   private:
     // 线程函数
     void workerLoop();
 
+    // 队列满时的处理策略：返回 true 表示已经通过丢弃某些任务腾出了空间
     bool handleOverflow(TaskPriority incomingPri);
+
+    // 自动调整线程数的后台线程
+    void adjustLoop();
 
   private:
     bool stopping_;
@@ -51,6 +67,24 @@ class ThreadPool {
     std::size_t maxQueueSize_{0};    // 任务队列最大数量
     std::size_t totalQueueSize_{0};  // 队列总数
 
+    // 动态伸缩相关
+    std::size_t minThreads_;
+    std::size_t maxThreads_;
+    std::size_t targetThreads_;
+    std::size_t threadsToStop_;
+    std::atomic<std::size_t> liveWorkers_{0};
+
+    // 自动伸缩控制线程
+    std::thread adjustThread_;
+    std::atomic<bool> autoTune_{false};
+    std::mutex mtxAdjust_;
+    std::condition_variable cvAdjust_;
+
+    // 自动调整的策略参数
+    std::size_t highWatermark_{1000};
+    std::size_t lowWatermark_{0};
+    int upThreshold_{3};
+    int downThreshold_{10};
 };
 
 template <typename F, typename... Args>
