@@ -8,37 +8,16 @@
 #include "Config.h"
 #include "ThreadPool.h"
 
-namespace {
-    std::atomic<int> gInflight{0};
-    constexpr int kMaxInflight = 10000;
-}  // namespace
-
-AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, size_t workerThreadsCount,
+AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount,
                        std::uint64_t idleTimeoutMs)
     : acceptor_(io_context_, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)),
       ioThreadsCount_(ioThreadsCount),
       metricsTimer_(io_context_),
       idleManager_(IdleConnectionManager::Duration(idleTimeoutMs)),
       idleTimer_(io_context_) {
-        
     if (ioThreadsCount_ <= 0) {
         ioThreadsCount_ = std::thread::hardware_concurrency();
     }
-    if (workerThreadsCount <= 0) {
-        workerThreadsCount = std::thread::hardware_concurrency();
-    }
-
-    const auto& tpc = Config::Instance().threadPool();
-    // 创建工作线程池
-    workerPool_ = std::make_shared<ThreadPool>(workerThreadsCount, tpc.maxQueueSize, tpc.minThreads, tpc.maxThreads);
-
-    // 开启自动伸缩（也可以通过配置开关）
-    workerPool_->setAutoTuneParams(tpc.highWatermark, tpc.lowWatermark, tpc.upThreshold, tpc.downThreshold);
-
-    if (tpc.autoTune) {
-        workerPool_->enableAutoTune(true);
-    }
-
     // 开始接受连接
     doAccept();
 
@@ -62,19 +41,10 @@ void AsioServer::run() {
         if (t.joinable())
             t.join();
     }
-
-    // 关闭工作线程池
-    if (workerPool_) {
-        workerPool_->shutdown();
-    }
 }
 
 void AsioServer::stop() {
     stopAccept();
-
-    if (workerPool_) {
-        workerPool_->shutdown();
-    }
     io_context_.stop();
 }
 
@@ -110,39 +80,11 @@ void AsioServer::doAccept() {
             MetricsRegistry::Instance().connections().inc();
 
             // 设置连接的回调
-            connection->setMessageCallback([this](const ConnectionPtr& conn, const std::string& message) {
+            connection->setMessageCallback([this](const ConnectionPtr& conn, Buffer& buf) {
                 if (!messageCallback_) {
                     return;
                 }
-                // 全局 in - flight 限制
-                int cur = gInflight.fetch_add(1, std::memory_order_relaxed);
-                if (cur >= kMaxInflight) {
-                    gInflight.fetch_sub(1, std::memory_order_relaxed);
-                    MetricsRegistry::Instance().totalErrors().inc();
-                    SPDLOG_ERROR("too many in-flight requests, drop message");
-                    return;
-                }
-
-                // 将消息处理任务提交给工作线程池
-                auto weak = std::weak_ptr<AsioConnection>(conn);
-                try {
-                    workerPool_->submit([this, weak, message]() {
-                        if (auto shared = weak.lock()) {
-                            try {
-                                messageCallback_(shared, message);
-                            } catch (const std::exception& ex) {
-                                SPDLOG_ERROR("userMessageCallback exception:{} ", ex.what());
-                            } catch (...) {
-                                SPDLOG_ERROR("userMessageCallback unknown exception");
-                            }
-                        }
-                        gInflight.fetch_sub(1, std::memory_order_relaxed);
-                    });
-                } catch (const std::exception& ex) {
-                    gInflight.fetch_sub(1, std::memory_order_relaxed);
-                    MetricsRegistry::Instance().totalErrors().inc();
-                    SPDLOG_ERROR("ThreadPool submit failed: {}", ex.what());
-                }
+                messageCallback_(conn, buf);
             });
 
             // 设置关闭回调

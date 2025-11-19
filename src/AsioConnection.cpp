@@ -57,8 +57,7 @@ void AsioConnection::doRead() {
                                         readBuf_->hasWritten(len);
 
                                         if (messageCallback_ && readBuf_->readableBytes() > 0) {
-                                            std::string chunk = readBuf_->retrieveAllAsString();
-                                            messageCallback_(self, chunk);
+                                            messageCallback_(self, *readBuf_);
                                         }
                                     }
                                     doRead();

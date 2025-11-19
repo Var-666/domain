@@ -2,7 +2,7 @@ BasedOnStyle: Google
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
-ColumnLimit: 120
+ColumnLimit: 160
 BreakBeforeBraces: Attach
 NamespaceIndentation: All
 AccessModifierOffset: -2

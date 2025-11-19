@@ -36,4 +36,6 @@ class InitServer {
     std::shared_ptr<boost::asio::io_context> signalIo_;
     std::shared_ptr<boost::asio::signal_set> signals_;
     std::thread signalThread_;
+
+    std::shared_ptr<ThreadPool> workerPool_;
 };

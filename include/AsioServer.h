@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "AsioConnection.h"
+#include "Buffer.h"
 #include "ConnectionManager.h"
 #include "IdleConnectionManager.h"
 #include "Metrics.h"
@@ -15,10 +16,10 @@
 class AsioServer {
   public:
     using tcp = boost::asio::ip::tcp;
-    using MessageCallback = std::function<void(const ConnectionPtr&, const std::string&)>;
+    using MessageCallback = std::function<void(const ConnectionPtr&, Buffer&)>;
     using CloseCallback = std::function<void(const ConnectionPtr&)>;
 
-    explicit AsioServer(unsigned short port, std::size_t ioThreadsCount = 0, std::size_t workerThreadsCount = 0,
+    explicit AsioServer(unsigned short port, std::size_t ioThreadsCount = 0,
                         std::uint64_t idleTimeoutMs = 60000);
 
     void run();
@@ -48,6 +49,9 @@ class AsioServer {
     std::shared_ptr<ThreadPool> workerPool_;
 
     ConnectionManager connectionManager_;
+
+    std::atomic<int> gInflight{0};
+    int kMaxInflight = 10000;
 
     MessageCallback messageCallback_;
     CloseCallback closeCallback_;

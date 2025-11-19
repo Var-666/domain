@@ -9,6 +9,7 @@ config = {
 
   -- 线程池限流：控制任务队列最多能积压多少任务
   threadPool = {
+    workerThreadsCount = 4,    -- 后台业务线程池大小（<=0 同样自动取核心数）
     maxQueueSize = 10000,      -- 0 表示不限制，其他为硬限制（超过会抛异常）
 
     minThreads = 2,
@@ -16,8 +17,9 @@ config = {
 
     autoTune = true,
 
-    highWatermark = maxQueueSize * 0.7,
-    lowWatermark = maxQueueSize * 0.1,
+    -- 根据 maxQueueSize 选定水位（这里直接写数值，避免 Lua 解析时 nil）
+    highWatermark = 7000,      -- ~70% 的 maxQueueSize
+    lowWatermark = 1000,       -- ~10% 的 maxQueueSize
     upThreshold = 3,
     downThreshold = 10,
   },
@@ -67,3 +69,6 @@ config = {
   }
 
 }
+
+-- 兼容下划线命名：有些解析器会读取 config.thread_pool
+config.thread_pool = config.threadPool

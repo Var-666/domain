@@ -8,6 +8,7 @@
 
 #include "AsioConnection.h"
 #include "Metrics.h"
+#include "Buffer.h"
 
 // 长度头 + 消息类型的简单协议：
 // [4字节len][2字节msgType][Body...]
@@ -19,7 +20,7 @@ class LengthHeaderCodec {
     explicit LengthHeaderCodec(FrameCallback cb);
 
     // 接收原始数据（AsioConnection onMessage 里调用）
-    void onMessage(const ConnectionPtr& conn, const std::string& data);
+    void onMessage(const ConnectionPtr& conn, Buffer& buf);
 
     // 连接关闭（AsioServer onClose 里调用），清理对应缓存
     void onClose(const ConnectionPtr& conn);
@@ -30,9 +31,6 @@ class LengthHeaderCodec {
     static std::string encodeFrame(uint16_t msgType, const std::string& body);
 
   private:
-    // 内部使用：从缓存中解析完整 frame
-    void processBuffer(const ConnectionPtr& conn, std::string& buffer);
-
     // 编码/解码辅助函数
     static uint32_t decodeUint32(const char* p);
     static uint16_t decodeUint16(const char* p);
@@ -41,7 +39,4 @@ class LengthHeaderCodec {
 
   private:
     FrameCallback frameCallback_;
-
-    std::unordered_map<ConnectionPtr, std::string> buffers_;
-    std::mutex mutex_;
 };

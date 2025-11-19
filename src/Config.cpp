@@ -78,34 +78,33 @@ bool Config::parseLuaConfig(void* pL) {
     lua_getfield(L, -1, "server");  // stack: ..., config, server
     if (lua_istable(L, -1)) {
         serverCfg_.port = static_cast<unsigned short>(getIntField(L, "port", serverCfg_.port));
-        serverCfg_.ioThreadsCount = static_cast<std::size_t>(getIntField(L, "io_threads", serverCfg_.ioThreadsCount));
-        serverCfg_.workerThreadsCount =
-            static_cast<std::size_t>(getIntField(L, "worker_threads", serverCfg_.workerThreadsCount));
-        serverCfg_.IdleTimeoutMs =
-            static_cast<std::uint64_t>(getIntField(L, "idle_timeout_ms", serverCfg_.IdleTimeoutMs));
+        serverCfg_.ioThreadsCount = static_cast<std::size_t>(getIntField(L, "ioThreadsCount", serverCfg_.ioThreadsCount));
+        serverCfg_.IdleTimeoutMs = static_cast<std::uint64_t>(getIntField(L, "IdleTimeoutMs", serverCfg_.IdleTimeoutMs));
     } else {
         std::cerr << "[Config] 'config.server' not found or not a table, use defaults\n";
     }
     lua_pop(L, 1);  // pop server
 
-    // ==== thread_pool ====（新加）
-    lua_getfield(L, -1, "thread_pool");
+    // ==== thread_pool ====（兼容 threadPool / thread_pool）
+    lua_getfield(L, -1, "threadPool");
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);                       // pop nil
+        lua_getfield(L, -1, "thread_pool");  // 再尝试下划线命名
+    }
     if (lua_istable(L, -1)) {
+        threadPoolCfg_.workerThreadsCount = static_cast<std::size_t>(getIntField(L, "workerThreadsCount", threadPoolCfg_.workerThreadsCount));
         threadPoolCfg_.minThreads = static_cast<std::size_t>(getIntField(L, "minThreads", threadPoolCfg_.minThreads));
         threadPoolCfg_.maxThreads = static_cast<std::size_t>(getIntField(L, "maxThreads", threadPoolCfg_.maxThreads));
-        threadPoolCfg_.maxQueueSize =
-            static_cast<std::size_t>(getIntField(L, "maxQueueSize", threadPoolCfg_.maxQueueSize));
+        threadPoolCfg_.maxQueueSize = static_cast<std::size_t>(getIntField(L, "maxQueueSize", threadPoolCfg_.maxQueueSize));
 
         threadPoolCfg_.autoTune = getBoolField(L, "autoTune", threadPoolCfg_.autoTune);
 
-        threadPoolCfg_.highWatermark =
-            static_cast<std::size_t>(getIntField(L, "highWatermark", threadPoolCfg_.highWatermark));
-        threadPoolCfg_.lowWatermark =
-            static_cast<std::size_t>(getIntField(L, "lowWatermark", threadPoolCfg_.lowWatermark));
+        threadPoolCfg_.highWatermark = static_cast<std::size_t>(getIntField(L, "highWatermark", threadPoolCfg_.highWatermark));
+        threadPoolCfg_.lowWatermark = static_cast<std::size_t>(getIntField(L, "lowWatermark", threadPoolCfg_.lowWatermark));
         threadPoolCfg_.upThreshold = static_cast<int>(getIntField(L, "upThreshold", threadPoolCfg_.upThreshold));
         threadPoolCfg_.downThreshold = static_cast<int>(getIntField(L, "downThreshold", threadPoolCfg_.downThreshold));
     } else {
-        std::cerr << "[Config] 'config.thread_pool' not found or not a table, use defaults\n";
+        std::cerr << "[Config] 'config.threadPool' not found or not a table, use defaults\n";
     }
     lua_pop(L, 1);  // pop thread_pool
 
@@ -113,8 +112,7 @@ bool Config::parseLuaConfig(void* pL) {
     lua_getfield(L, -1, "limits");  // stack: ..., config, limits
     if (lua_istable(L, -1)) {
         serverCfg_.maxInflight = static_cast<int>(getIntField(L, "max_inflight", serverCfg_.maxInflight));
-        serverCfg_.maxSendBufferBytes =
-            static_cast<std::size_t>(getIntField(L, "max_send_buffer_bytes", serverCfg_.maxSendBufferBytes));
+        serverCfg_.maxSendBufferBytes = static_cast<std::size_t>(getIntField(L, "max_send_buffer_bytes", serverCfg_.maxSendBufferBytes));
     } else {
         std::cerr << "[Config] 'config.limits' not found or not a table, use defaults\n";
     }
@@ -133,8 +131,7 @@ bool Config::parseLuaConfig(void* pL) {
         lua_pop(L, 1);
 
         logCfg_.asyncQueueSize = static_cast<std::size_t>(getIntField(L, "asyncQueueSize", logCfg_.asyncQueueSize));
-        logCfg_.flushIntervalMs =
-            static_cast<std::uint64_t>(getIntField(L, "flushIntervalMs", logCfg_.flushIntervalMs));
+        logCfg_.flushIntervalMs = static_cast<std::uint64_t>(getIntField(L, "flushIntervalMs", logCfg_.flushIntervalMs));
 
         // console
         lua_getfield(L, -1, "console");

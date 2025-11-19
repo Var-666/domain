@@ -8,7 +8,6 @@
 struct ServerConfig {
     unsigned short port = 8080;
     std::size_t ioThreadsCount = 2;
-    std::size_t workerThreadsCount = 4;
     std::uint64_t IdleTimeoutMs = 60000;
     std::size_t maxQueueSize = 10000;
     int maxInflight = 10000;
@@ -16,6 +15,7 @@ struct ServerConfig {
 };
 
 struct ThreadPoolConfig {
+    std::size_t workerThreadsCount = 4;
     std::size_t minThreads = 2;
     std::size_t maxThreads = 8;
     std::size_t maxQueueSize = 10000;

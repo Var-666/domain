@@ -1,76 +1,85 @@
 #include "Codec.h"
 
+#include <spdlog/spdlog.h>
+
 LengthHeaderCodec::LengthHeaderCodec(FrameCallback cb) : frameCallback_(std::move(cb)) {}
 
-void LengthHeaderCodec::onMessage(const ConnectionPtr& conn, const std::string& data) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    auto& buffer = buffers_[conn];
-    buffer.append(data);
-    processBuffer(conn, buffer);
-}
-
-void LengthHeaderCodec::onClose(const ConnectionPtr& conn) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    buffers_.erase(conn);
-}
-
-void LengthHeaderCodec::processBuffer(const ConnectionPtr& conn, std::string& buffer) {
-    const size_t headerlen = 4 + 2;  // 4字节长度 + 2字节消息类型
-
+void LengthHeaderCodec::onMessage(const ConnectionPtr& conn, Buffer& buf) {
+    constexpr std::size_t headerlen = 4 + 2;
     while (true) {
-        if (buffer.size() < headerlen) {
-            return;  // 不足以读取头部，等待更多数据
+        // 1. 先看头是否完整
+        if (buf.readableBytes() < headerlen) {
+            break;
         }
+        const char* p = buf.peek();
 
-        // 取出 len（不移除，只预读）
-        uint32_t len = decodeUint32(buffer.data());
+        // 2. 读取 len（不移动读指针）
+        std::uint32_t len = decodeUint32(p);
         if (len < 2) {
-            // 协议错误：len 至少包括 2字节 msgType
             MetricsRegistry::Instance().totalErrors().inc();
-            
-            buffer.clear();
-            return;  // 非法长度，清空缓存
+            SPDLOG_ERROR("[Codec] Invalid frame length:{}, drop all remaining bytes ", len);
+            buf.retrieveAll();
+            break;
         }
 
-        uint32_t totalLen = 4 + len;  // 总长度 = 4字节len + len
-        if (buffer.size() < totalLen) {
-            return;  // 不足以读取完整 frame，等待更多数据
+        std::uint32_t totalLen = 4 + len;
+        if (buf.readableBytes() < totalLen) {
+            // 一个完整 frame 还没到齐，退出等待下次
+            break;
         }
 
-        const char* p = buffer.data();
-        p += 4;  // 跳过 len
+        // 3. 真正开始消费数据：先跳过 4 字节 length
+        buf.retrieve(4);
 
-        uint16_t msgType = decodeUint16(p);
-        p += 2;  // 跳过 msgType
+        // 4. 读取 msgType
+        if (buf.readableBytes() < 2) {
+            // 理论上不会发生，因为上面已经检查 totalLen 充足
+            buf.retrieveAll();
+            break;
+        }
 
-        uint32_t bodyLen = len - 2;
-        std::string body(p, bodyLen);
+        std::uint16_t msgType = decodeUint16(buf.peek());
+        buf.retrieve(2);
 
-        buffer.erase(0, totalLen);  // 移除已处理的数据
+        // 5. 读取 body
+        std::uint32_t bodyLen = len - 2;
+        std::string body;
+        body.resize(bodyLen);
+        if (bodyLen > 0) {
+            if (buf.readableBytes() < bodyLen) {
+                // 理论上也不会发生（已经保证 totalLen 够）
+                buf.retrieveAll();
+                break;
+            }
+            std::memcpy(body.data(), buf.peek(), bodyLen);
+            buf.retrieve(bodyLen);
+        }
 
+        // 6. 调用上层回调 + 统计 Metrics（真正成功解出了一帧）
         if (frameCallback_) {
             auto start = std::chrono::steady_clock::now();
 
             try {
                 frameCallback_(conn, msgType, body);
-                MetricsRegistry::Instance().totalFrames().inc();  // ✅ 真正解出了一帧，再 +1
+                MetricsRegistry::Instance().totalFrames().inc();
             } catch (const std::exception& ex) {
                 MetricsRegistry::Instance().totalErrors().inc();
                 std::cerr << "[Codec] FrameCallback exception: " << ex.what() << "\n";
-                // 根据需求决定是否继续 throw，这里建议先不抛，免得上层再统计一遍
-                // throw;
+                // 这里不再往上抛，避免整个 worker 线程被异常干掉
             } catch (...) {
                 MetricsRegistry::Instance().totalErrors().inc();
                 std::cerr << "[Codec] FrameCallback unknown exception\n";
-                // throw;
             }
 
             auto end = std::chrono::steady_clock::now();
             double ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
-            MetricsRegistry::Instance().frameLatency().observe(ms);  // ✅ 统计真正“处理一帧”的耗时
+            MetricsRegistry::Instance().frameLatency().observe(ms);
         }
+        // 7. while(true) 继续尝试解析下一帧（如果 Buffer 中还有完整数据）
     }
 }
+
+void LengthHeaderCodec::onClose(const ConnectionPtr& conn) {}
 
 void LengthHeaderCodec::send(const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
     std::string buf = encodeFrame(msgType, body);

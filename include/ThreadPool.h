@@ -15,8 +15,7 @@ enum class TaskPriority {
 
 class ThreadPool {
   public:
-    explicit ThreadPool(std::size_t numThreads, std::size_t maxQueueSize = 0, std::size_t minThreads = 0,
-                        std::size_t maxThreads = 0);
+    explicit ThreadPool(std::size_t numThreads, std::size_t maxQueueSize = 0, std::size_t minThreads = 0, std::size_t maxThreads = 0);
     ~ThreadPool();
 
     // 提交任务到线程池
@@ -71,7 +70,7 @@ class ThreadPool {
     std::size_t minThreads_;
     std::size_t maxThreads_;
     std::size_t targetThreads_;
-    std::size_t threadsToStop_;
+    std::size_t threadsToStop_{0};
     std::atomic<std::size_t> liveWorkers_{0};
 
     // 自动伸缩控制线程
@@ -88,12 +87,10 @@ class ThreadPool {
 };
 
 template <typename F, typename... Args>
-auto ThreadPool::submit(TaskPriority pri, F&& f, Args&&... args)
-    -> std::future<typename std::invoke_result<F, Args...>::type> {
+auto ThreadPool::submit(TaskPriority pri, F&& f, Args&&... args) -> std::future<typename std::invoke_result<F, Args...>::type> {
     using ReturnType = typename std::invoke_result<F, Args...>::type;
     // 创建一个打包任务
-    auto task = std::make_shared<std::packaged_task<ReturnType()>>(
-        [fun = std::forward<F>(f), ... arg = std::forward<Args>(args)]() { return fun(arg...); });
+    auto task = std::make_shared<std::packaged_task<ReturnType()>>([fun = std::forward<F>(f), ... arg = std::forward<Args>(args)]() { return fun(arg...); });
     std::future<ReturnType> fut = task->get_future();
     {
         std::unique_lock<std::mutex> lock(mutex_);

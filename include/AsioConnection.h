@@ -18,7 +18,7 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
   public:
     // 类型别名
     using tcp = boost::asio::ip::tcp;
-    using MessageCallback = std::function<void(const ConnectionPtr&, const std::string&)>;
+    using MessageCallback = std::function<void(const ConnectionPtr&, Buffer&)>;
     using CloseCallback = std::function<void(const ConnectionPtr&)>;
 
     // 构造函数
