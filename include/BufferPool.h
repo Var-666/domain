@@ -12,7 +12,7 @@
 class BufferPool {
   public:
     struct Deleter;
-    using Ptr = std::unique_ptr<Buffer, Deleter>;
+    using Ptr = std::shared_ptr<Buffer>;
 
     static BufferPool& Instance();
 

@@ -5,8 +5,10 @@
 #include <atomic>
 #include <boost/asio.hpp>
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <string_view>
 
 #include "Buffer.h"
 #include "ThreadPool.h"
@@ -22,11 +24,13 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     using CloseCallback = std::function<void(const ConnectionPtr&)>;
 
     // 构造函数
-    explicit AsioConnection(boost::asio::io_context& io_context, tcp::socket socket,
-                            size_t maxSendBufferBytes = 4 * 1024 * 1024);
+    explicit AsioConnection(boost::asio::io_context& io_context, tcp::socket socket, size_t maxSendBufferBytes = 4 * 1024 * 1024);
     void start();
-    void send(const std::string& message);
     void close();
+
+    void send(const std::string& message);
+    void send(std::string_view message);
+    void sendBuffer(const BufferPool::Ptr& buf);
 
     void setMessageCallback(MessageCallback cb);
     void setCloseCallback(CloseCallback cb);
@@ -47,7 +51,9 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     boost::asio::ip::tcp::socket socket_;
 
     BufferPool::Ptr readBuf_;
-    BufferPool::Ptr writeBuf_;
+
+    std::deque<BufferPool::Ptr> sendQueue_;
+    std::size_t sendQueueBytes_{0};
 
     MessageCallback messageCallback_;
     CloseCallback closeCallback_;

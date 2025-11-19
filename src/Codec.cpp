@@ -82,8 +82,22 @@ void LengthHeaderCodec::onMessage(const ConnectionPtr& conn, Buffer& buf) {
 void LengthHeaderCodec::onClose(const ConnectionPtr& conn) {}
 
 void LengthHeaderCodec::send(const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
-    std::string buf = encodeFrame(msgType, body);
-    conn->send(buf);
+    std::uint32_t len = 2 + static_cast<std::uint32_t>(body.size());
+    std::size_t totalSize = 4 + 2 + body.size();
+
+    auto buf = BufferPool::Instance().acquire(totalSize);
+
+    std::uint32_t netLen = htonl(len);
+    buf->append(&netLen, sizeof(netLen));
+
+    std::uint16_t netType = htons(msgType);
+    buf->append(&netType, sizeof(netType));
+
+    if (!body.empty()) {
+        buf->append(body.data(), body.size());
+    }
+
+    conn->sendBuffer(buf);
 }
 
 std::string LengthHeaderCodec::encodeFrame(uint16_t msgType, const std::string& body) {

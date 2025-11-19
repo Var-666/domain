@@ -19,6 +19,7 @@ BufferPool::Ptr BufferPool::acquire(std::size_t minWritable) {
     // 全局缓存（有锁）
     std::unique_ptr<Buffer> owned;
     {
+        std::lock_guard<std::mutex> lock(mtx_);
         if (!globalFree_.empty()) {
             owned = std::move(globalFree_.back());
             globalFree_.pop_back();
