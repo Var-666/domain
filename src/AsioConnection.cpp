@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include "Metrics.h"
 
 AsioConnection::AsioConnection(boost::asio::io_context& io_context, tcp::socket socket, size_t maxSendBufferBytes)
     : io_context_(io_context), socket_(std::move(socket)), maxSendBuf_(maxSendBufferBytes) {
@@ -67,6 +68,7 @@ void AsioConnection::doRead() {
         boost::asio::buffer(readBuf_->beginWrite(), readBuf_->writableBytes()), [this, self](const boost::system::error_code& ec, std::size_t len) {
             if (!ec) {
                 if (len > 0) {
+                    MetricsRegistry::Instance().bytesIn().inc(len);
                     touch();
                     readBuf_->hasWritten(len);
 
@@ -148,6 +150,7 @@ void AsioConnection::doWrite() {
         }
 
         sendQueueBytes_ -= bytesToSend;
+        MetricsRegistry::Instance().bytesOut().inc(bytesToSend);
 
         if (!sendQueue_.empty()) {
             doWrite();

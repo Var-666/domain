@@ -57,7 +57,7 @@ config = {
     -- echo：示例，限制 QPS 和并发
     [2] = {
       enabled = true,
-      maxQps = 10000,
+      maxQps = 100000,
       maxConcurrent = 1000,
     },
     -- 以后你有重型请求，比如排行榜查询，可以限得更严

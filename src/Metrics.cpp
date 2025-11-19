@@ -45,8 +45,31 @@ void LatencyMetric::print(const std::string& name, std::ostream& os) const {
         double avg = s.sumMs / s.count;
         os << ", avg=" << std::fixed << std::setprecision(3) << avg << "ms";
     }
-    os << " | buckets(ms) [0-1):" << s.bucket[0] << " [1-5):" << s.bucket[1] << " [5-10):" << s.bucket[2]
-       << " [10-50):" << s.bucket[3] << " [50+):" << s.bucket[4];
+    os << " | buckets(ms) [0-1):" << s.bucket[0] << " [1-5):" << s.bucket[1] << " [5-10):" << s.bucket[2] << " [10-50):" << s.bucket[3]
+       << " [50+):" << s.bucket[4] << "\n";
+}
+
+void LatencyMetric::printPrometheus(const std::string& name, std::ostream& os) const {
+    auto s = snapshot();
+
+    const double bounds[5] = {1.0, 5.0, 20.0, 100.0, std::numeric_limits<double>::infinity()};
+    std::uint64_t cum = 0;
+
+    os << "# TYPE " << name << " histogram\n";
+
+    for (std::size_t i = 0; i < 5; ++i) {
+        cum += s.bucket[i];
+        os << name << "_bucket{le=\"";
+        if (i < 4) {
+            os << bounds[i];
+        } else {
+            os << "+Inf";
+        }
+        os << "\"} " << cum << "\n";
+    }
+
+    os << name << "_sum " << std::fixed << std::setprecision(6) << s.sumMs << "\n";
+    os << name << "_count " << s.count << "\n";
 }
 
 std::size_t LatencyMetric::bucketIndex(double ms) {
@@ -72,13 +95,52 @@ Counter& MetricsRegistry::totalFrames() { return totalFrames_; }
 
 Counter& MetricsRegistry::totalErrors() { return totalErrors_; }
 
+Counter& MetricsRegistry::bytesIn() { return bytesIn_; }
+
+Counter& MetricsRegistry::bytesOut() { return bytesOut_; }
+
+Counter& MetricsRegistry::droppedFrames() { return droppedFrames_; }
+
+Counter& MetricsRegistry::inflightFrames() { return inflightFrames_; }
+
 LatencyMetric& MetricsRegistry::frameLatency() { return frameLatency_; }
 
 void MetricsRegistry::printSnapshot(std::ostream& os) const {
-    os << "==== Metrics =====================================================================================\n";
-    os << "connections=" << connections_.value() << "\n";
-    os << "totalFrames=" << totalFrames_.value() << "\n";
-    os << "totalErrors=" << totalErrors_.value() << "\n";
+    os << "======================================= Metrics Snapshot ===========================================\n";
+    os << "connections     = " << connections_.value() << "\n";
+    os << "totalFrames     = " << totalFrames_.value() << "\n";
+    os << "totalErrors     = " << totalErrors_.value() << "\n";
+    os << "bytesIn         = " << bytesIn_.value() << "\n";
+    os << "bytesOut        = " << bytesOut_.value() << "\n";
+    os << "droppedFrames   = " << droppedFrames_.value() << "\n";
     frameLatency_.print("frameLatency", os);
-    os << "\n==================================================================================================\n";
+    os << "====================================================================================================\n";
+}
+
+void MetricsRegistry::printPrometheus(std::ostream& os) const {
+    // Counters / Gauges
+    os << "# TYPE server_connections gauge\n";
+    os << "server_connections " << connections_.value() << "\n\n";
+
+    os << "# TYPE server_total_frames counter\n";
+    os << "server_total_frames " << totalFrames_.value() << "\n\n";
+
+    os << "# TYPE server_total_errors counter\n";
+    os << "server_total_errors " << totalErrors_.value() << "\n\n";
+
+    os << "# TYPE server_bytes_in counter\n";
+    os << "server_bytes_in " << bytesIn_.value() << "\n\n";
+
+    os << "# TYPE server_bytes_out counter\n";
+    os << "server_bytes_out " << bytesOut_.value() << "\n\n";
+
+    os << "# TYPE server_dropped_frames counter\n";
+    os << "server_dropped_frames " << droppedFrames_.value() << "\n\n";
+
+    os << "# TYPE server_inflight_frames gauge\n";
+    os << "server_inflight_frames " << inflightFrames_.value() << "\n\n";
+
+    // Histograms
+    frameLatency_.printPrometheus("server_frame_latency_ms", os);
+    os << "\n";
 }

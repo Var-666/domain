@@ -7,6 +7,7 @@
 #include "AsioServer.h"
 #include "Codec.h"
 #include "Config.h"
+#include "HttpControlServer.h"
 #include "MessageRouter.h"
 
 class InitServer {
@@ -21,6 +22,7 @@ class InitServer {
     std::shared_ptr<MessageRouter> buildRouter(const Config& cfg);
     std::shared_ptr<LengthHeaderCodec> buildCodec(const std::shared_ptr<MessageRouter>& router);
     std::shared_ptr<AsioServer> buildServer(const ServerConfig& sc, const std::shared_ptr<LengthHeaderCodec>& codec);
+    std::shared_ptr<HttpControlServer> buildHttpControlServer(const Config& cfg);
 
     void startSignalWatcher();
     void stopSignalWatcher();
@@ -31,6 +33,7 @@ class InitServer {
     std::shared_ptr<MessageRouter> router_;
     std::shared_ptr<LengthHeaderCodec> codec_;
     std::shared_ptr<AsioServer> server_;
+    std::shared_ptr<HttpControlServer> httpServer_;
 
     // 信号监听 io + 线程
     std::shared_ptr<boost::asio::io_context> signalIo_;

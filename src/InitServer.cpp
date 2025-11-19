@@ -14,8 +14,7 @@ InitServer::InitServer(const Config& cfg) : cfg_(cfg) {
     // 1. 先建线程池（用前面 Lua 配置里的 thread_pool）
     const auto& tpc = cfg_.threadPool();
 
-    workerPool_ =
-        std::make_shared<ThreadPool>(tpc.workerThreadsCount, tpc.maxQueueSize, tpc.minThreads, tpc.maxThreads);
+    workerPool_ = std::make_shared<ThreadPool>(tpc.workerThreadsCount, tpc.maxQueueSize, tpc.minThreads, tpc.maxThreads);
     workerPool_->setAutoTuneParams(tpc.highWatermark, tpc.lowWatermark, tpc.upThreshold, tpc.downThreshold);
     if (tpc.autoTune) {
         workerPool_->enableAutoTune(true);
@@ -25,12 +24,19 @@ InitServer::InitServer(const Config& cfg) : cfg_(cfg) {
     router_ = buildRouter(cfg_);
     codec_ = buildCodec(router_);
     server_ = buildServer(cfg_.server(), codec_);
+    httpServer_ = buildHttpControlServer(cfg_);
 
     // 启动信号监听
     startSignalWatcher();
 }
 
-InitServer::~InitServer() { stopSignalWatcher(); }
+InitServer::~InitServer() {
+    stopSignalWatcher();
+    if (httpServer_) {
+        httpServer_->stop();  // 或者完全依赖 ~HttpControlServer 自动 stop
+        httpServer_.reset();
+    }
+}
 
 void InitServer::run() { server_->run(); }
 
@@ -46,9 +52,8 @@ std::shared_ptr<MessageRouter> InitServer::buildRouter(const Config& cfg) {
     routes.applyTo(*router);
 
     // 3. 默认 handler
-    router->setDefaultHandler([](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
-        SPDLOG_WARN("Unknown msgType={} bodySize={}", msgType, body.size());
-    });
+    router->setDefaultHandler(
+        [](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) { SPDLOG_WARN("Unknown msgType={} bodySize={}", msgType, body.size()); });
 
     return router;
 }
@@ -57,11 +62,14 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
     auto workerPool = workerPool_;  // 拷贝一份 shared_ptr，用于 lambda 捕获
 
     auto frameCb = [router, workerPool](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+        MetricsRegistry::Instance().inflightFrames().inc();
+
         // 全局 in-flight 限制：按“帧”维度
         int cur = gInflight.fetch_add(1, std::memory_order_relaxed);
         if (cur >= kMaxInflight) {
             gInflight.fetch_sub(1, std::memory_order_relaxed);
             MetricsRegistry::Instance().totalErrors().inc();
+            MetricsRegistry::Instance().droppedFrames().inc();
             SPDLOG_ERROR("too many in-flight frames, drop msgType={}", msgType);
             return;
         }
@@ -78,6 +86,7 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
                         SPDLOG_ERROR("router->onMessage unknown exception");
                     }
                 }
+                MetricsRegistry::Instance().inflightFrames().inc(-1);
                 gInflight.fetch_sub(1, std::memory_order_relaxed);
             });
         } catch (const std::exception& ex) {
@@ -91,8 +100,7 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
     return codec;
 }
 
-std::shared_ptr<AsioServer> InitServer::buildServer(const ServerConfig& sc,
-                                                    const std::shared_ptr<LengthHeaderCodec>& codec) {
+std::shared_ptr<AsioServer> InitServer::buildServer(const ServerConfig& sc, const std::shared_ptr<LengthHeaderCodec>& codec) {
     auto server = std::make_shared<AsioServer>(sc.port, sc.ioThreadsCount, sc.IdleTimeoutMs);
 
     server->setMessageCallback([codec](const ConnectionPtr& conn, Buffer& buf) { codec->onMessage(conn, buf); });
@@ -104,6 +112,18 @@ std::shared_ptr<AsioServer> InitServer::buildServer(const ServerConfig& sc,
 
     SPDLOG_INFO("Server built: port={}, ioThreads={}, idleTimeoutMs={}", sc.port, sc.ioThreadsCount, sc.IdleTimeoutMs);
     return server;
+}
+
+std::shared_ptr<HttpControlServer> InitServer::buildHttpControlServer(const Config& cfg) {
+    unsigned short httpPort = 9100;  // 假设你已经加了 metrics 配置
+
+    auto readyCheck = [srv = server_]() -> bool { return srv && srv->isAccepting(); };
+
+    auto httpServer = std::make_shared<HttpControlServer>(httpPort, readyCheck);
+    httpServer->start();
+
+    SPDLOG_INFO("HttpControlServer built & started on port {}", httpPort);
+    return httpServer;
 }
 
 void InitServer::startSignalWatcher() {

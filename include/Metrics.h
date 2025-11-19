@@ -1,9 +1,11 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <ostream>
 #include <string>
 
 class Counter {
@@ -25,17 +27,18 @@ class LatencyMetric {
         std::uint64_t bucket[5];
     };
 
-    void aotmicAdd(std::atomic<double>& target, double value);
-
     LatencyMetric();
+    // 观察一次耗时（毫秒）
     void observe(double ms);
 
     Snapshot snapshot() const;
 
     void print(const std::string& name, std::ostream& os) const;
+    void printPrometheus(const std::string& name, std::ostream& os) const;
 
   private:
     static std::size_t bucketIndex(double ms);
+    void aotmicAdd(std::atomic<double>& target, double value);
 
   private:
     std::atomic<std::uint64_t> count_;
@@ -48,12 +51,18 @@ class MetricsRegistry {
   public:
     static MetricsRegistry& Instance();
 
-    Counter& connections();
-    Counter& totalFrames();
-    Counter& totalErrors();
-    LatencyMetric& frameLatency();
+    Counter& connections();    // 当前连接数（inc/dec）
+    Counter& totalFrames();    // 总解包帧数
+    Counter& totalErrors();    // 总错误数
+    Counter& bytesIn();        // 接收字节数
+    Counter& bytesOut();       // 发送字节数
+    Counter& droppedFrames();  // 因限流/队列满被丢弃的帧数
+    Counter& inflightFrames();  // 当前正在处理的帧数（可以当做 gauge 用
+
+    LatencyMetric& frameLatency();  // 每帧处理耗时（从 Codec 调用 handler 到返回）
 
     void printSnapshot(std::ostream& os) const;
+    void printPrometheus(std::ostream& os) const;
 
   private:
     MetricsRegistry() = default;
@@ -61,5 +70,10 @@ class MetricsRegistry {
     Counter connections_;
     Counter totalFrames_;
     Counter totalErrors_;
+    Counter bytesIn_;
+    Counter bytesOut_;
+    Counter droppedFrames_;
+    Counter inflightFrames_;
+
     LatencyMetric frameLatency_;
 };

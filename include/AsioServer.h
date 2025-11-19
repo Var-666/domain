@@ -34,6 +34,8 @@ class AsioServer {
 
     boost::asio::io_context& ioContext();
 
+    bool isAccepting() const;
+
   private:
     void doAccept();
     void scheduleMetricsReport();
@@ -56,4 +58,6 @@ class AsioServer {
 
     IdleConnectionManager idleManager_;
     boost::asio::steady_timer idleTimer_;
+
+    std::atomic<bool> accepting_{false};
 };

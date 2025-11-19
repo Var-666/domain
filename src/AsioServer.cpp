@@ -8,8 +8,7 @@
 #include "Config.h"
 #include "ThreadPool.h"
 
-AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount,
-                       std::uint64_t idleTimeoutMs)
+AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, std::uint64_t idleTimeoutMs)
     : acceptor_(io_context_, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)),
       ioThreadsCount_(ioThreadsCount),
       metricsTimer_(io_context_),
@@ -29,7 +28,9 @@ void AsioServer::run() {
     for (size_t i = 0; i < ioThreadsCount_; ++i) {
         ioThreads_.emplace_back([this]() {
             try {
+                accepting_.store(true, std::memory_order_relaxed);
                 io_context_.run();
+                accepting_.store(false, std::memory_order_relaxed);
             } catch (const std::exception& e) {
                 SPDLOG_ERROR("IO thread exception: {}", e.what());
             }
@@ -49,6 +50,7 @@ void AsioServer::stop() {
 }
 
 void AsioServer::stopAccept() {
+    accepting_.store(false, std::memory_order_relaxed);
     boost::system::error_code ec;
     acceptor_.cancel(ec);
     acceptor_.close(ec);
@@ -145,3 +147,5 @@ void AsioServer::setCloseCallback(CloseCallback cb) { closeCallback_ = std::move
 std::size_t AsioServer::connectionCount() const { return connectionManager_.size(); }
 
 boost::asio::io_context& AsioServer::ioContext() { return io_context_; }
+
+bool AsioServer::isAccepting() const { return accepting_.load(std::memory_order_relaxed); }
