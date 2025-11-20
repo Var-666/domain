@@ -1,5 +1,6 @@
 #include "ThreadPool.h"
 
+#include "Metrics.h"
 #include <spdlog/spdlog.h>
 
 ThreadPool::ThreadPool(std::size_t numThreads, std::size_t maxQueueSize, std::size_t minThreads, std::size_t maxThreads)
@@ -124,6 +125,16 @@ void ThreadPool::setAutoTuneParams(std::size_t highWatermark, std::size_t lowWat
 
 void ThreadPool::workerLoop() {
     liveWorkers_.fetch_add(1, std::memory_order_relaxed);
+    MetricsRegistry::Instance().workerLiveThreads().inc();
+    // 确保无论哪条 return 路径都能把计数减回去
+    struct Guard {
+        ThreadPool* pool;
+        ~Guard() {
+            pool->liveWorkers_.fetch_sub(1, std::memory_order_relaxed);
+            MetricsRegistry::Instance().workerLiveThreads().inc(-1);
+        }
+    } guard{this};
+    
     while (true) {
         std::function<void()> task;
         {
@@ -155,10 +166,10 @@ void ThreadPool::workerLoop() {
             }
 
             --totalQueueSize_;
+            MetricsRegistry::Instance().workerQueueSize().inc(-1);
         }
         task();
     }
-    liveWorkers_.fetch_sub(1, std::memory_order_relaxed);
 }
 
 bool ThreadPool::handleOverflow(TaskPriority incomingPri) {
@@ -169,6 +180,7 @@ bool ThreadPool::handleOverflow(TaskPriority incomingPri) {
         if (!q.empty()) {
             q.pop();
             --totalQueueSize_;
+            MetricsRegistry::Instance().workerQueueSize().inc(-1);
             // 这里可选：记录 "丢弃任务" 的 Metrics 或日志
             return true;
         }

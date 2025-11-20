@@ -2,4 +2,3 @@
 #include <atomic>
 
 extern std::atomic<int> gInflight;
-extern const int kMaxInflight;

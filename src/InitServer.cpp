@@ -22,7 +22,7 @@ InitServer::InitServer(const Config& cfg) : cfg_(cfg) {
 
     // 按顺序构建组件
     router_ = buildRouter(cfg_);
-    codec_ = buildCodec(router_);
+    codec_ = buildCodec(router_, cfg_);
     server_ = buildServer(cfg_.server(), codec_);
     httpServer_ = buildHttpControlServer(cfg_);
 
@@ -58,18 +58,20 @@ std::shared_ptr<MessageRouter> InitServer::buildRouter(const Config& cfg) {
     return router;
 }
 
-std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<MessageRouter>& router) {
+std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<MessageRouter>& router, const Config& cfg) {
     auto workerPool = workerPool_;  // 拷贝一份 shared_ptr，用于 lambda 捕获
 
-    auto frameCb = [router, workerPool](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+    auto frameCb = [router, workerPool, cfg](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
         MetricsRegistry::Instance().inflightFrames().inc();
 
         // 全局 in-flight 限制：按“帧”维度
         int cur = gInflight.fetch_add(1, std::memory_order_relaxed);
-        if (cur >= kMaxInflight) {
+        if (cur >= cfg.limits().maxInflight) {
             gInflight.fetch_sub(1, std::memory_order_relaxed);
+            MetricsRegistry::Instance().inflightFrames().inc(-1);
             MetricsRegistry::Instance().totalErrors().inc();
             MetricsRegistry::Instance().droppedFrames().inc();
+            MetricsRegistry::Instance().inflightRejects().inc();
             SPDLOG_ERROR("too many in-flight frames, drop msgType={}", msgType);
             return;
         }
@@ -91,6 +93,7 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
             });
         } catch (const std::exception& ex) {
             gInflight.fetch_sub(1, std::memory_order_relaxed);
+            MetricsRegistry::Instance().inflightFrames().inc(-1);
             MetricsRegistry::Instance().totalErrors().inc();
             SPDLOG_ERROR("ThreadPool submit failed in FrameCallback: {}", ex.what());
         }
@@ -122,7 +125,6 @@ std::shared_ptr<HttpControlServer> InitServer::buildHttpControlServer(const Conf
     auto httpServer = std::make_shared<HttpControlServer>(httpPort, readyCheck);
     httpServer->start();
 
-    SPDLOG_INFO("HttpControlServer built & started on port {}", httpPort);
     return httpServer;
 }
 

@@ -51,6 +51,10 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     boost::asio::ip::tcp::socket socket_;
 
     BufferPool::Ptr readBuf_;
+    bool readPaused_{false};
+
+    std::size_t highWatermark_{0};
+    std::size_t lowWatermark_{0};
 
     std::deque<BufferPool::Ptr> sendQueue_;
     std::size_t sendQueueBytes_{0};

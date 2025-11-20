@@ -3,6 +3,7 @@ project(domain CXX)
 
 # 生成编译命令数据库，方便代码补全和静态分析工具使用
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(FETCHCONTENT_QUIET OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,3 +57,4 @@ target_link_libraries(client
         ${LUA_LIBRARIES}
         spdlog::spdlog
 )
+

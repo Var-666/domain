@@ -1,7 +1,7 @@
 config = {
   -- server 相关配置
   server = {
-    port = 8080,               -- 监听端口
+    port = 8888,               -- 监听端口
     ioThreadsCount = 2,        -- Asio I/O 线程数（<=0 会自动用 CPU 核心数）
     workerThreadsCount = 4,    -- 后台业务线程池大小（<=0 同样自动取核心数）
     IdleTimeoutMs = 60000,     -- 空闲连接超时毫秒数，超过则由 IdleConnectionManager 关闭
@@ -46,6 +46,19 @@ config = {
       maxSizeMb = 100,         -- 单个文件最大 MB
       maxFiles = 5,            -- 最多保留几个轮转日志
     },
+  },
+
+  backpressure = {
+    -- 背压时（连接发送队列或其他触发）是否直接拒绝低优先级消息
+    rejectLowPriority = true,
+    -- 在背压时会被直接拒绝的 msgType（示例：echo/业务查询）
+    lowPriorityMsgTypes = { 2, 200 },
+    -- 永远放行（心跳/管理类）
+    allowMsgTypes = { 1 },
+    -- 拒绝时的错误帧（需客户端协商）：
+    sendErrorFrame = true,
+    errorMsgType = 65535,
+    errorBody = 'backpressure',
   },
 
   -- 按 msgType 的限流配置

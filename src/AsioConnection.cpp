@@ -6,10 +6,14 @@
 #include <iostream>
 #include <memory>
 #include <string>
+
 #include "Metrics.h"
 
 AsioConnection::AsioConnection(boost::asio::io_context& io_context, tcp::socket socket, size_t maxSendBufferBytes)
     : io_context_(io_context), socket_(std::move(socket)), maxSendBuf_(maxSendBufferBytes) {
+    highWatermark_ = maxSendBuf_ * 0.8;
+    lowWatermark_ = maxSendBuf_ * 0.5;
+
     readBuf_ = BufferPool::Instance().acquire(4096);
 }
 
@@ -45,10 +49,20 @@ void AsioConnection::sendBuffer(const BufferPool::Ptr& buf) {
     auto self = shared_from_this();
 
     // 所有写操作都回到 socket 所在的 executor，避免跨线程 data race
-    boost::asio::post(socket_.get_executor(), [this, self, buf = std::move(buf)]() mutable {
+    boost::asio::post(socket_.get_executor(), [this, self, buf]() mutable {
         bool idle = sendQueue_.empty();
         sendQueueBytes_ += buf->readableBytes();
         sendQueue_.push_back(buf);
+
+        // ---------- Backpressure: 触发 ----------
+        if (!readPaused_ && sendQueueBytes_ > highWatermark_) {
+            readPaused_ = true;
+
+            MetricsRegistry::Instance().onBackpressureEnter();
+
+            SPDLOG_WARN("[Backpressure] Pause read: queueBytes={} high={}", sendQueueBytes_, highWatermark_);
+        }
+
         if (idle) {
             doWrite();
         }
@@ -61,6 +75,12 @@ void AsioConnection::close() {
 }
 
 void AsioConnection::doRead() {
+    if (closing_)
+        return;
+    if (readPaused_) {
+        // 暂停读取：等待写队列降下来
+        return;
+    }
     auto self = shared_from_this();
 
     readBuf_->ensureWritableBytes(4096);
@@ -80,7 +100,7 @@ void AsioConnection::doRead() {
             } else {
                 if (ec == boost::asio::error::eof || ec == boost::asio::error::connection_reset || ec == boost::asio::error::operation_aborted) {
                 } else {
-                    SPDLOG_ERROR("Write error: {}", ec.message());
+                    SPDLOG_ERROR("Read error: {}", ec.message());
                 }
                 handleClose();
             }
@@ -98,7 +118,7 @@ void AsioConnection::doWrite() {
 
     // --- 合并策略参数：可以先写死，后面放到 Config 里 ---
     constexpr std::size_t kMaxBatchBytes = 16 * 1024;
-    constexpr std::size_t kMaxBacthCount = 8;
+    constexpr std::size_t kMaxBatchCount = 8;
 
     BufferPool::Ptr bufToSend;
     std::size_t bytesToSend = 0;
@@ -113,12 +133,12 @@ void AsioConnection::doWrite() {
         bufToSend = BufferPool::Instance().acquire(kMaxBatchBytes);
 
         std::size_t batchCount = 0;
-        while (!sendQueue_.empty() && batchCount < kMaxBacthCount) {
+        while (!sendQueue_.empty() && batchCount < kMaxBatchCount) {
             BufferPool::Ptr& src = sendQueue_.front();
             std::size_t sz = src->readableBytes();
 
             // 限制总合并大小，至少合并一个
-            if (batchCount > 0 && bytesToSend + sz > kMaxBacthCount) {
+            if (batchCount > 0 && bytesToSend + sz > kMaxBatchBytes) {
                 break;
             }
             if (sz > 0) {
@@ -152,6 +172,16 @@ void AsioConnection::doWrite() {
         sendQueueBytes_ -= bytesToSend;
         MetricsRegistry::Instance().bytesOut().inc(bytesToSend);
 
+        // ---------- Backpressure: 恢复 ----------
+        if (readPaused_ && sendQueueBytes_ <= lowWatermark_) {
+            readPaused_ = false;
+            MetricsRegistry::Instance().onBackpressureExit();
+
+            SPDLOG_WARN("[Backpressure] Resume read: queueBytes={} low={}", sendQueueBytes_, lowWatermark_);
+
+            doRead();
+        }
+
         if (!sendQueue_.empty()) {
             doWrite();
         } else {
@@ -164,6 +194,11 @@ void AsioConnection::handleClose() {
     if (closing_)
         return;
     closing_ = true;
+
+    if (readPaused_) {
+        readPaused_ = false;
+        MetricsRegistry::Instance().onBackpressureExit();
+    }
 
     boost::system::error_code ec;
     socket_.shutdown(tcp::socket::shutdown_both, ec);

@@ -9,6 +9,7 @@
 #include <numeric>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "Codec.h"  // 用到 LengthHeaderCodec::encodeFrame
@@ -70,43 +71,87 @@ namespace {
 
 }  // namespace
 
-int main(int argc, char** argv) {
-    std::string host = "8.159.139.110";
+struct Options {
+    std::string host = "127.0.0.1";
     unsigned short port = 8080;
-    std::size_t concurrency = std::thread::hardware_concurrency();  // 并发连接数
-    std::size_t totalRequests = 100000;                             // 总请求数（所有线程加起来）
+    std::size_t concurrency = std::thread::hardware_concurrency();
+    std::size_t totalRequests = 100000;
+    std::size_t payloadSize = 12;  // 默认 payload 大小
+    std::uint16_t errorMsgType = 0xFFFF;  // 服务端配置的错误帧 msgType
+    bool sendHeartbeat = true;
+};
 
-    if (argc >= 2) {
-        host = argv[1];
-    }
-    if (argc >= 3) {
-        port = static_cast<unsigned short>(std::stoi(argv[2]));
-    }
-    if (argc >= 4) {
-        concurrency = static_cast<std::size_t>(std::stoul(argv[3]));
-    }
-    if (argc >= 5) {
-        totalRequests = static_cast<std::size_t>(std::stoul(argv[4]));
+Options parseOptions(int argc, char** argv) {
+    Options opt;
+
+    // 兼容原有 positional 参数：host port concurrency requests
+    std::size_t positional = 0;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg.rfind("--", 0) == 0) {
+            if (arg == "--payload" && i + 1 < argc) {
+                opt.payloadSize = static_cast<std::size_t>(std::stoul(argv[++i]));
+            } else if (arg == "--error-type" && i + 1 < argc) {
+                opt.errorMsgType = static_cast<std::uint16_t>(std::stoul(argv[++i]));
+            } else if (arg == "--no-heartbeat") {
+                opt.sendHeartbeat = false;
+            }
+            continue;
+        }
+
+        switch (positional) {
+            case 0:
+                opt.host = arg;
+                break;
+            case 1:
+                opt.port = static_cast<unsigned short>(std::stoi(arg));
+                break;
+            case 2:
+                opt.concurrency = static_cast<std::size_t>(std::stoul(arg));
+                break;
+            case 3:
+                opt.totalRequests = static_cast<std::size_t>(std::stoul(arg));
+                break;
+            default:
+                break;
+        }
+        ++positional;
     }
 
-    std::cout << "[bench] host=" << host << " port=" << port << " concurrency=" << concurrency << " totalRequests=" << totalRequests << "\n";
+    if (opt.concurrency == 0) {
+        opt.concurrency = std::thread::hardware_concurrency();
+    }
+    return opt;
+}
+
+int main(int argc, char** argv) {
+    Options opt = parseOptions(argc, argv);
+
+    std::cout << "[bench] host=" << opt.host << " port=" << opt.port << " concurrency=" << opt.concurrency << " totalRequests=" << opt.totalRequests
+              << " payload=" << opt.payloadSize << " errorMsgType=" << opt.errorMsgType << " heartbeat=" << (opt.sendHeartbeat ? "on" : "off") << "\n";
 
     std::atomic<std::uint64_t> success{0};
     std::atomic<std::uint64_t> failed{0};
+    std::atomic<std::uint64_t> dropped{0};  // 收到错误帧
 
     // 每个线程的延迟记录，单位 ms
-    std::vector<std::vector<double>> threadLatencies(concurrency);
+    std::vector<std::vector<double>> threadLatencies(opt.concurrency);
+    std::vector<std::unordered_map<uint16_t, std::uint64_t>> threadErrorTypes(opt.concurrency);
 
     auto startAll = std::chrono::steady_clock::now();
 
     std::vector<std::thread> threads;
-    threads.reserve(concurrency);
+    threads.reserve(opt.concurrency);
 
     // 平均分配请求数，多出来的前几个线程多 1 个
-    std::size_t basePerThread = totalRequests / concurrency;
-    std::size_t extra = totalRequests % concurrency;
+    std::size_t basePerThread = opt.totalRequests / opt.concurrency;
+    std::size_t extra = opt.totalRequests % opt.concurrency;
 
-    for (std::size_t tid = 0; tid < concurrency; ++tid) {
+    // 准备 payload
+    std::string payload;
+    payload.resize(opt.payloadSize, 'x');
+
+    for (std::size_t tid = 0; tid < opt.concurrency; ++tid) {
         std::size_t myRequests = basePerThread + (tid < extra ? 1 : 0);
 
         threads.emplace_back([&, tid, myRequests]() {
@@ -114,17 +159,17 @@ int main(int argc, char** argv) {
                 boost::asio::io_context io;
                 tcp::socket socket(io);
 
-                tcp::endpoint ep(boost::asio::ip::make_address(host), port);
+                tcp::endpoint ep(boost::asio::ip::make_address(opt.host), opt.port);
                 socket.connect(ep);
 
                 // 可选：关闭 Nagle，减小延迟抖动
                 boost::asio::ip::tcp::no_delay nd(true);
                 socket.set_option(nd);
 
-                // 先发一个心跳试试
-                sendFrame(socket, MSG_HEARTBEAT, "");
-
-                std::string payload = "hello router";
+                // 先发一个心跳试试（可选）
+                if (opt.sendHeartbeat) {
+                    sendFrame(socket, MSG_HEARTBEAT, "");
+                }
 
                 auto& latVec = threadLatencies[tid];
                 latVec.reserve(myRequests);
@@ -140,14 +185,15 @@ int main(int argc, char** argv) {
 
                     auto t1 = std::chrono::steady_clock::now();
                     double ms = toMs(t1 - t0);
-                    latVec.push_back(ms);
-
-                    if (resp.msgType != MSG_ECHO) {
-                        ++failed;
-                        // 可以选择中断，或者继续
-                        // break;
-                    } else {
+                    if (resp.msgType == MSG_ECHO) {
+                        latVec.push_back(ms);
                         ++success;
+                    } else if (resp.msgType == opt.errorMsgType) {
+                        ++dropped;
+                        threadErrorTypes[tid][resp.msgType]++;
+                    } else {
+                        ++failed;
+                        threadErrorTypes[tid][resp.msgType]++;
                     }
                 }
 
@@ -169,7 +215,8 @@ int main(int argc, char** argv) {
 
     std::uint64_t succ = success.load();
     std::uint64_t fail = failed.load();
-    std::uint64_t done = succ + fail;
+    std::uint64_t drop = dropped.load();
+    std::uint64_t done = succ + fail + drop;
 
     // 汇总所有线程的延迟
     std::vector<double> allLat;
@@ -197,15 +244,30 @@ int main(int argc, char** argv) {
 
     double qps = (totalSec > 0) ? (succ / totalSec) : 0.0;
 
+    // 合并其他响应类型计数
+    std::unordered_map<uint16_t, std::uint64_t> otherTypes;
+    for (const auto& mp : threadErrorTypes) {
+        for (const auto& kv : mp) {
+            otherTypes[kv.first] += kv.second;
+        }
+    }
+
     std::cout << "===== Benchmark Result =====\n";
-    std::cout << "concurrency      : " << concurrency << "\n";
-    std::cout << "total requests   : " << totalRequests << "\n";
-    std::cout << "done (succ+fail) : " << done << " (succ=" << succ << ", fail=" << fail << ")\n";
+    std::cout << "concurrency      : " << opt.concurrency << "\n";
+    std::cout << "total requests   : " << opt.totalRequests << "\n";
+    std::cout << "done (succ+fail+drop) : " << done << " (succ=" << succ << ", fail=" << fail << ", drop=" << drop << ")\n";
     std::cout << "total time (s)   : " << totalSec << "\n";
     std::cout << "QPS              : " << qps << "\n";
     std::cout << "avg latency (ms) : " << avg << "\n";
     std::cout << "p95 latency (ms) : " << p95 << "\n";
     std::cout << "p99 latency (ms) : " << p99 << "\n";
+    if (!otherTypes.empty()) {
+        std::cout << "other resp types :";
+        for (auto& kv : otherTypes) {
+            std::cout << " [" << kv.first << "]=" << kv.second;
+        }
+        std::cout << "\n";
+    }
     std::cout << "============================\n";
 
     return 0;

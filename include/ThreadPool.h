@@ -7,6 +7,7 @@
 #include <queue>
 #include <thread>
 #include <vector>
+#include "Metrics.h"
 enum class TaskPriority {
     High = 0,
     Normal = 1,
@@ -116,6 +117,7 @@ auto ThreadPool::submit(TaskPriority pri, F&& f, Args&&... args) -> std::future<
                 break;
         }
         ++totalQueueSize_;
+        MetricsRegistry::Instance().workerQueueSize().inc();
     }
     cv_.notify_one();
     return fut;

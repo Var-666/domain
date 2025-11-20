@@ -5,14 +5,17 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <ostream>
 #include <string>
+#include <unordered_map>
 
 class Counter {
   public:
     Counter();
     void inc(std::int64_t n = 1);
     std::int64_t value() const;
+    std::int64_t fetchAdd(std::int64_t n);
 
   private:
     std::atomic<std::int64_t> value_;
@@ -51,15 +54,26 @@ class MetricsRegistry {
   public:
     static MetricsRegistry& Instance();
 
-    Counter& connections();    // 当前连接数（inc/dec）
-    Counter& totalFrames();    // 总解包帧数
-    Counter& totalErrors();    // 总错误数
-    Counter& bytesIn();        // 接收字节数
-    Counter& bytesOut();       // 发送字节数
-    Counter& droppedFrames();  // 因限流/队列满被丢弃的帧数
-    Counter& inflightFrames();  // 当前正在处理的帧数（可以当做 gauge 用
+    Counter& connections();                // 当前连接数（inc/dec）
+    Counter& totalFrames();                // 总解包帧数
+    Counter& totalErrors();                // 总错误数
+    Counter& bytesIn();                    // 接收字节数
+    Counter& bytesOut();                   // 发送字节数
+    Counter& droppedFrames();              // 因限流/队列满被丢弃的帧数
+    Counter& inflightFrames();             // 当前正在处理的帧数
+    Counter& backpressureTriggered();      // 数值：触发次数
+    Counter& backpressureActive();         // gauge：当前是否处于 backpressure（0/1）
+    Counter& backpressureDroppedLowPri();  // 背压场景下丢弃低优先级消息
+    Counter& backpressureDurationMs();     // 背压累计持续时长（ms）
+    Counter& inflightRejects();            // 因 in-flight 超限被拒绝的次数
+    Counter& workerQueueSize();            // worker 队列长度（Gauge）
+    Counter& workerLiveThreads();          // worker 线程活跃数量（Gauge）
+    void incMsgReject(std::uint16_t msgType);
 
     LatencyMetric& frameLatency();  // 每帧处理耗时（从 Codec 调用 handler 到返回）
+
+    void onBackpressureEnter();
+    void onBackpressureExit();
 
     void printSnapshot(std::ostream& os) const;
     void printPrometheus(std::ostream& os) const;
@@ -74,6 +88,16 @@ class MetricsRegistry {
     Counter bytesOut_;
     Counter droppedFrames_;
     Counter inflightFrames_;
+    Counter backpressureTriggered_;
+    Counter backpressureActive_;
+    Counter backpressureDroppedLowPri_;
+    Counter backpressureDurationMs_;
+    Counter inflightRejects_;
+    Counter workerQueueSize_;
+    Counter workerLiveThreads_;
+    std::atomic<std::uint64_t> backpressureStartMs_{0};
+    mutable std::mutex msgRejectsMtx_;
+    std::unordered_map<std::uint16_t, std::atomic<std::uint64_t>> msgRejects_;
 
     LatencyMetric frameLatency_;
 };

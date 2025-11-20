@@ -6,6 +6,8 @@ void Counter::inc(int64_t n) { value_.fetch_add(n, std::memory_order_relaxed); }
 
 std::int64_t Counter::value() const { return value_.load(std::memory_order_relaxed); }
 
+std::int64_t Counter::fetchAdd(std::int64_t n) { return value_.fetch_add(n, std::memory_order_relaxed); }
+
 void LatencyMetric::aotmicAdd(std::atomic<double>& target, double value) {
     double old = target.load(std::memory_order_relaxed);
     double desired;
@@ -103,7 +105,57 @@ Counter& MetricsRegistry::droppedFrames() { return droppedFrames_; }
 
 Counter& MetricsRegistry::inflightFrames() { return inflightFrames_; }
 
+Counter& MetricsRegistry::backpressureTriggered() { return backpressureTriggered_; }
+
+Counter& MetricsRegistry::backpressureActive() { return backpressureActive_; }
+
+Counter& MetricsRegistry::backpressureDroppedLowPri() { return backpressureDroppedLowPri_; }
+
+Counter& MetricsRegistry::backpressureDurationMs() { return backpressureDurationMs_; }
+
+Counter& MetricsRegistry::inflightRejects() { return inflightRejects_; }
+
+Counter& MetricsRegistry::workerQueueSize() { return workerQueueSize_; }
+
+Counter& MetricsRegistry::workerLiveThreads() { return workerLiveThreads_; }
+
+void MetricsRegistry::incMsgReject(std::uint16_t msgType) {
+    std::lock_guard<std::mutex> lock(msgRejectsMtx_);
+    auto& c = msgRejects_[msgType];
+    c.fetch_add(1, std::memory_order_relaxed);
+}
+
 LatencyMetric& MetricsRegistry::frameLatency() { return frameLatency_; }
+
+namespace {
+    std::uint64_t nowMs() {
+        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(now).count());
+    }
+}  // namespace
+
+void MetricsRegistry::onBackpressureEnter() {
+    backpressureTriggered_.inc();
+    auto prev = backpressureActive_.fetchAdd(1);
+    if (prev == 0) {
+        backpressureStartMs_.store(nowMs(), std::memory_order_relaxed);
+    }
+}
+
+void MetricsRegistry::onBackpressureExit() {
+    auto prev = backpressureActive_.fetchAdd(-1);
+    if (prev <= 0) {
+        backpressureActive_.fetchAdd(1);
+        return;
+    }
+    if (prev == 1) {
+        auto start = backpressureStartMs_.exchange(0, std::memory_order_relaxed);
+        if (start > 0) {
+            auto dur = nowMs() - start;
+            backpressureDurationMs_.inc(static_cast<std::int64_t>(dur));
+        }
+    }
+}
 
 void MetricsRegistry::printSnapshot(std::ostream& os) const {
     os << "======================================= Metrics Snapshot ===========================================\n";
@@ -113,6 +165,13 @@ void MetricsRegistry::printSnapshot(std::ostream& os) const {
     os << "bytesIn         = " << bytesIn_.value() << "\n";
     os << "bytesOut        = " << bytesOut_.value() << "\n";
     os << "droppedFrames   = " << droppedFrames_.value() << "\n";
+    os << "backpressureTriggered   = " << backpressureTriggered_.value() << "\n";
+    os << "backpressureActive   = " << backpressureActive_.value() << "\n";
+    os << "backpressureDropLowPri   = " << backpressureDroppedLowPri_.value() << "\n";
+    os << "backpressureDurationMs   = " << backpressureDurationMs_.value() << "\n";
+    os << "inflightRejects   = " << inflightRejects_.value() << "\n";
+    os << "workerQueueSize   = " << workerQueueSize_.value() << "\n";
+    os << "workerLiveThreads   = " << workerLiveThreads_.value() << "\n";
     frameLatency_.print("frameLatency", os);
     os << "====================================================================================================\n";
 }
@@ -137,8 +196,38 @@ void MetricsRegistry::printPrometheus(std::ostream& os) const {
     os << "# TYPE server_dropped_frames counter\n";
     os << "server_dropped_frames " << droppedFrames_.value() << "\n\n";
 
+    os << "# TYPE server_backpressure_triggered_total counter\n";
+    os << "server_backpressure_triggered_total " << backpressureTriggered_.value() << "\n\n";
+
+    os << "# TYPE server_backpressure_active gauge\n";
+    os << "server_backpressure_active " << backpressureActive_.value() << "\n\n";
+
+    os << "# TYPE server_backpressure_drop_lowpri counter\n";
+    os << "server_backpressure_drop_lowpri " << backpressureDroppedLowPri_.value() << "\n\n";
+
+    os << "# TYPE server_backpressure_duration_ms counter\n";
+    os << "server_backpressure_duration_ms " << backpressureDurationMs_.value() << "\n\n";
+
+    os << "# TYPE server_inflight_rejects_total counter\n";
+    os << "server_inflight_rejects_total " << inflightRejects_.value() << "\n\n";
+
+    os << "# TYPE server_worker_queue_size gauge\n";
+    os << "server_worker_queue_size " << workerQueueSize_.value() << "\n\n";
+
+    os << "# TYPE server_worker_live_threads gauge\n";
+    os << "server_worker_live_threads " << workerLiveThreads_.value() << "\n\n";
+
     os << "# TYPE server_inflight_frames gauge\n";
     os << "server_inflight_frames " << inflightFrames_.value() << "\n\n";
+
+    if (!msgRejects_.empty()) {
+        os << "# TYPE server_msg_reject_total counter\n";
+        std::lock_guard<std::mutex> lock(msgRejectsMtx_);
+        for (const auto& kv : msgRejects_) {
+            os << "server_msg_reject_total{msgType=\"" << kv.first << "\"} " << kv.second.load(std::memory_order_relaxed) << "\n";
+        }
+        os << "\n";
+    }
 
     // Histograms
     frameLatency_.printPrometheus("server_frame_latency_ms", os);

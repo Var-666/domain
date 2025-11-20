@@ -33,6 +33,24 @@ static bool getBoolField(lua_State* L, const char* key, bool def) {
     return v;
 }
 
+// 解析 uint16 列表到 unordered_set
+static void parseUint16Set(lua_State* L, const char* key, std::unordered_set<std::uint16_t>& out) {
+    lua_getfield(L, -1, key);
+    if (lua_istable(L, -1)) {
+        lua_pushnil(L);
+        while (lua_next(L, -2) != 0) {
+            if (lua_isinteger(L, -1)) {
+                auto v = lua_tointeger(L, -1);
+                if (v >= 0 && v <= 0xFFFF) {
+                    out.insert(static_cast<std::uint16_t>(v));
+                }
+            }
+            lua_pop(L, 1);  // pop value
+        }
+    }
+    lua_pop(L, 1);  // pop list
+}
+
 bool Config::loadFromFile(const std::string& path) {
     lua_State* L = luaL_newstate();
     if (!L) {
@@ -59,7 +77,11 @@ const ServerConfig& Config::server() const { return serverCfg_; }
 
 const LogConfig& Config::log() const { return logCfg_; }
 
-const ThreadPoolConfig Config::threadPool() const { return threadPoolCfg_; }
+const ThreadPoolConfig& Config::threadPool() const { return threadPoolCfg_; }
+
+const Limits& Config::limits() const { return limitscfg_; }
+
+const BackpressureConfig& Config::backpressure() const { return backpressureCfg_; }
 
 const std::unordered_map<std::uint16_t, MsgLimitConfig>& Config::msgLimits() const { return msgLimitsCfg_; }
 
@@ -111,12 +133,40 @@ bool Config::parseLuaConfig(void* pL) {
     // ==== limits ====
     lua_getfield(L, -1, "limits");  // stack: ..., config, limits
     if (lua_istable(L, -1)) {
-        serverCfg_.maxInflight = static_cast<int>(getIntField(L, "max_inflight", serverCfg_.maxInflight));
-        serverCfg_.maxSendBufferBytes = static_cast<std::size_t>(getIntField(L, "max_send_buffer_bytes", serverCfg_.maxSendBufferBytes));
+        limitscfg_.maxInflight = static_cast<std::size_t>(getIntField(L, "max_inflight", limitscfg_.maxInflight));
+        limitscfg_.maxSendBufferBytes = static_cast<std::size_t>(getIntField(L, "max_send_buffer_bytes", limitscfg_.maxSendBufferBytes));
     } else {
         std::cerr << "[Config] 'config.limits' not found or not a table, use defaults\n";
     }
     lua_pop(L, 1);  // pop limits
+
+    // ==== backpressure ====
+    lua_getfield(L, -1, "backpressure");
+    if (lua_istable(L, -1)) {
+        backpressureCfg_.rejectLowPriority = getBoolField(L, "rejectLowPriority", backpressureCfg_.rejectLowPriority);
+        backpressureCfg_.sendErrorFrame = getBoolField(L, "sendErrorFrame", backpressureCfg_.sendErrorFrame);
+
+        lua_getfield(L, -1, "errorMsgType");
+        if (lua_isinteger(L, -1)) {
+            auto v = lua_tointeger(L, -1);
+            if (v >= 0 && v <= 0xFFFF) {
+                backpressureCfg_.errorMsgType = static_cast<std::uint16_t>(v);
+            }
+        }
+        lua_pop(L, 1);  // pop errorMsgType
+
+        lua_getfield(L, -1, "errorBody");
+        if (lua_isstring(L, -1)) {
+            backpressureCfg_.errorBody = lua_tostring(L, -1);
+        }
+        lua_pop(L, 1);  // pop errorBody
+
+        parseUint16Set(L, "lowPriorityMsgTypes", backpressureCfg_.lowPriorityMsgTypes);
+        parseUint16Set(L, "allowMsgTypes", backpressureCfg_.alwaysAllowMsgTypes);
+    } else {
+        // 可选配置，不存在则沿用默认
+    }
+    lua_pop(L, 1);  // pop backpressure
 
     // ==== Log ====
     lua_getfield(L, -1, "log");

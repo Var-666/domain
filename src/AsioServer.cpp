@@ -73,7 +73,7 @@ void AsioServer::doAccept() {
 
     acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket socket) {
         if (!ec) {
-            auto connection = std::make_shared<AsioConnection>(io_context_, std::move(socket));
+            auto connection = std::make_shared<AsioConnection>(io_context_, std::move(socket), Config::Instance().limits().maxSendBufferBytes);
 
             connectionManager_.add(connection);
             idleManager_.add(connection);
@@ -93,7 +93,7 @@ void AsioServer::doAccept() {
             connection->setCloseCallback([this](const ConnectionPtr& conn) {
                 connectionManager_.remove(conn);
                 idleManager_.remove(conn);
-                // MetricsRegistry::Instance().connections().inc(-1);
+                MetricsRegistry::Instance().connections().inc(-1);
                 if (closeCallback_) {
                     closeCallback_(conn);
                 }

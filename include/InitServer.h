@@ -20,7 +20,7 @@ class InitServer {
 
   private:
     std::shared_ptr<MessageRouter> buildRouter(const Config& cfg);
-    std::shared_ptr<LengthHeaderCodec> buildCodec(const std::shared_ptr<MessageRouter>& router);
+    std::shared_ptr<LengthHeaderCodec> buildCodec(const std::shared_ptr<MessageRouter>& router, const Config& cfg);
     std::shared_ptr<AsioServer> buildServer(const ServerConfig& sc, const std::shared_ptr<LengthHeaderCodec>& codec);
     std::shared_ptr<HttpControlServer> buildHttpControlServer(const Config& cfg);
 
