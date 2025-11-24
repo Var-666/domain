@@ -10,6 +10,8 @@
 #include "Middlewares.h"
 #include "Routes/CoreRoutes.h"
 #include "Routes/RouteRegistry.h"
+#include <google/protobuf/empty.pb.h>
+#include <nlohmann/json.hpp>
 
 InitServer::InitServer(const Config& cfg) : cfg_(cfg) {
     // 1. 先建线程池（用前面 Lua 配置里的 thread_pool）
@@ -54,6 +56,19 @@ std::shared_ptr<MessageRouter> InitServer::buildRouter(const Config& cfg) {
     RouteRegistry routes;
     CoreRoutes::Register(routes);
     routes.applyTo(*router);
+
+    // JSON 路由示例
+    router->registerJson(MSG_JSON_ECHO, [](const ConnectionPtr& conn, const nlohmann::json& j) {
+        nlohmann::json resp;
+        resp["echo"] = j;
+        LengthHeaderCodec::send(conn, MSG_JSON_ECHO, resp.dump());
+    });
+
+    // Protobuf 路由示例（使用 google.protobuf.Empty）
+    router->registerProto<google::protobuf::Empty>(MSG_PROTO_PING, [](const ConnectionPtr& conn, const google::protobuf::Empty&) {
+        google::protobuf::Empty resp;
+        LengthHeaderCodec::send(conn, MSG_PROTO_PING, resp.SerializeAsString());
+    });
 
     // 3. 默认 handler
     router->setDefaultHandler(

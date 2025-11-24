@@ -6,10 +6,12 @@
 enum : std::uint16_t {
     MSG_HEARTBEAT = 1,
     MSG_ECHO = 2,
+    MSG_JSON_ECHO = 3,
+    MSG_PROTO_PING = 4,
 };
 
 namespace CoreRoutes {
-    void Register(RouteRegistry& registry) {
+    inline void Register(RouteRegistry& registry) {
         // 心跳
         registry.add(MSG_HEARTBEAT, "heartbeat", [](const ConnectionPtr& conn, const std::string& body) {
 

@@ -13,8 +13,8 @@ int main() {
 
     //  加载 Lua 配置
     auto& cfg = Config::Instance();
-    if (!cfg.loadFromFile("../config.lua")) {
-        std::cerr << "Failed to load config.lua, use defaults.\n";
+    if (!cfg.loadFromFile("../config/config.lua")) {
+        std::cerr << "Failed to load config/config.lua, use defaults.\n";
     }
     Logging::InitFromConfig();
 

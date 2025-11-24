@@ -4,7 +4,18 @@
 
 void MessageRouter::registerHandler(std::uint16_t msgType, MessageHandler handler) {
     std::lock_guard<std::mutex> lock(mtx_);
-    handlers_[msgType] = std::move(handler);
+    HandlerEntry entry;
+    entry.fmt = PayloadFormat::Raw;
+    entry.rawHandler = std::move(handler);
+    handlers_[msgType] = std::move(entry);
+}
+
+void MessageRouter::registerJson(std::uint16_t msgType, std::function<void(const ConnectionPtr&, const nlohmann::json&)> handler) {
+    std::lock_guard<std::mutex> lock(mtx_);
+    HandlerEntry entry;
+    entry.fmt = PayloadFormat::Json;
+    entry.jsonHandler = std::move(handler);
+    handlers_[msgType] = std::move(entry);
 }
 
 void MessageRouter::setDefaultHandler(
@@ -54,14 +65,41 @@ void MessageRouter::dispatch(std::size_t idx, MessageContext& ctx) {
     }
 
     auto handler = getHandler(ctx.msgType);
-    if (handler) {
-        handler(ctx.conn, *ctx.body);
-    } else {
-        SPDLOG_WARN("No handler for msgType={}", ctx.msgType);
+    switch (handler.fmt) {
+        case PayloadFormat::Raw:
+            if (handler.rawHandler) {
+                handler.rawHandler(ctx.conn, *ctx.body);
+                return;
+            }
+            break;
+        case PayloadFormat::Json:
+            if (handler.jsonHandler) {
+                try {
+                    auto json = nlohmann::json::parse(*ctx.body);
+                    handler.jsonHandler(ctx.conn, json);
+                    return;
+                } catch (const std::exception& ex) {
+                    SPDLOG_WARN("Json parse failed for msgType={}, err={}", ctx.msgType, ex.what());
+                    return;
+                }
+            }
+            break;
+        case PayloadFormat::Proto:
+            if (handler.protoHandler && handler.protoFactory) {
+                auto msg = handler.protoFactory();
+                if (msg && msg->ParseFromString(*ctx.body)) {
+                    handler.protoHandler(ctx.conn, *msg);
+                    return;
+                }
+                SPDLOG_WARN("Proto parse failed for msgType={}", ctx.msgType);
+                return;
+            }
+            break;
     }
+    SPDLOG_WARN("No handler for msgType={}", ctx.msgType);
 }
 
-MessageHandler MessageRouter::getHandler(std::uint16_t msgType) {
+HandlerEntry MessageRouter::getHandler(std::uint16_t msgType) {
     std::lock_guard<std::mutex> lock(mtx_);
     auto it = handlers_.find(msgType);
     if (it != handlers_.end()) {
@@ -69,9 +107,11 @@ MessageHandler MessageRouter::getHandler(std::uint16_t msgType) {
     }
 
     // 没有注册：返回一个 wrapper 调 defaultHandler_（如果有）
+    HandlerEntry entry;
     if (defaultHandler_) {
+        entry.fmt = PayloadFormat::Raw;
         auto def = defaultHandler_;
-        return [def, msgType](const ConnectionPtr& conn, const std::string& body) { def(conn, msgType, body); };
+        entry.rawHandler = [def, msgType](const ConnectionPtr& conn, const std::string& body) { def(conn, msgType, body); };
     }
-    return {};
+    return entry;
 }

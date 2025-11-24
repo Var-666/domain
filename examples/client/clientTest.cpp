@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <google/protobuf/empty.pb.h>
 #include <boost/asio.hpp>
 #include <chrono>
 #include <cstring>  // std::memcpy
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <numeric>
 #include <string>
 #include <thread>
@@ -13,13 +15,11 @@
 #include <vector>
 
 #include "Codec.h"  // 用到 LengthHeaderCodec::encodeFrame
+#include "Routes/CoreRoutes.h"
 
 using boost::asio::ip::tcp;
 
 namespace {
-    constexpr uint16_t MSG_HEARTBEAT = 1;
-    constexpr uint16_t MSG_ECHO = 2;
-
     // 阻塞读，直到把 len 字节读满
     void readExact(tcp::socket& socket, void* data, std::size_t len) {
         std::size_t readBytes = 0;
@@ -79,6 +79,7 @@ struct Options {
     std::size_t payloadSize = 12;  // 默认 payload 大小
     std::vector<uint16_t> errorMsgTypes = {0xFFFF, 65000, 65001, 65002, 65003};  // 识别为错误帧的 msgType
     bool sendHeartbeat = true;
+    std::string mode = "raw";  // raw/json/proto
 };
 
 Options parseOptions(int argc, char** argv) {
@@ -96,6 +97,8 @@ Options parseOptions(int argc, char** argv) {
                 opt.errorMsgTypes.push_back(static_cast<std::uint16_t>(std::stoul(argv[++i])));
             } else if (arg == "--no-heartbeat") {
                 opt.sendHeartbeat = false;
+            } else if (arg == "--mode" && i + 1 < argc) {
+                opt.mode = argv[++i];
             }
             continue;
         }
@@ -129,7 +132,7 @@ int main(int argc, char** argv) {
     Options opt = parseOptions(argc, argv);
 
     std::cout << "[bench] host=" << opt.host << " port=" << opt.port << " concurrency=" << opt.concurrency << " totalRequests=" << opt.totalRequests
-              << " payload=" << opt.payloadSize << " heartbeat=" << (opt.sendHeartbeat ? "on" : "off") << "\n";
+              << " payload=" << opt.payloadSize << " heartbeat=" << (opt.sendHeartbeat ? "on" : "off") << " mode=" << opt.mode << "\n";
 
     std::atomic<std::uint64_t> success{0};
     std::atomic<std::uint64_t> failed{0};
@@ -178,15 +181,27 @@ int main(int argc, char** argv) {
                 for (std::size_t i = 0; i < myRequests; ++i) {
                     auto t0 = std::chrono::steady_clock::now();
 
-                    // 发送 echo
-                    sendFrame(socket, MSG_ECHO, payload);
+                    uint16_t msgTypeToSend = MSG_ECHO;
+                    std::string body = payload;
+                    if (opt.mode == "json") {
+                        msgTypeToSend = MSG_JSON_ECHO;
+                        nlohmann::json j;
+                        j["msg"] = payload;
+                        body = j.dump();
+                    } else if (opt.mode == "proto") {
+                        msgTypeToSend = MSG_PROTO_PING;
+                        google::protobuf::Empty empty;
+                        body = empty.SerializeAsString();
+                    }
+
+                    sendFrame(socket, msgTypeToSend, body);
 
                     // 同步等待响应
                     Frame resp = readFrame(socket);
 
                     auto t1 = std::chrono::steady_clock::now();
                     double ms = toMs(t1 - t0);
-                    if (resp.msgType == MSG_ECHO) {
+                    if (resp.msgType == msgTypeToSend) {
                         latVec.push_back(ms);
                         ++success;
                     } else if (std::find(opt.errorMsgTypes.begin(), opt.errorMsgTypes.end(), resp.msgType) != opt.errorMsgTypes.end()) {
