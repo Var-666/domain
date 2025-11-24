@@ -77,7 +77,7 @@ struct Options {
     std::size_t concurrency = std::thread::hardware_concurrency();
     std::size_t totalRequests = 100000;
     std::size_t payloadSize = 12;  // 默认 payload 大小
-    std::uint16_t errorMsgType = 0xFFFF;  // 服务端配置的错误帧 msgType
+    std::vector<uint16_t> errorMsgTypes = {0xFFFF, 65000, 65001, 65002, 65003};  // 识别为错误帧的 msgType
     bool sendHeartbeat = true;
 };
 
@@ -92,7 +92,8 @@ Options parseOptions(int argc, char** argv) {
             if (arg == "--payload" && i + 1 < argc) {
                 opt.payloadSize = static_cast<std::size_t>(std::stoul(argv[++i]));
             } else if (arg == "--error-type" && i + 1 < argc) {
-                opt.errorMsgType = static_cast<std::uint16_t>(std::stoul(argv[++i]));
+                opt.errorMsgTypes.clear();
+                opt.errorMsgTypes.push_back(static_cast<std::uint16_t>(std::stoul(argv[++i])));
             } else if (arg == "--no-heartbeat") {
                 opt.sendHeartbeat = false;
             }
@@ -128,7 +129,7 @@ int main(int argc, char** argv) {
     Options opt = parseOptions(argc, argv);
 
     std::cout << "[bench] host=" << opt.host << " port=" << opt.port << " concurrency=" << opt.concurrency << " totalRequests=" << opt.totalRequests
-              << " payload=" << opt.payloadSize << " errorMsgType=" << opt.errorMsgType << " heartbeat=" << (opt.sendHeartbeat ? "on" : "off") << "\n";
+              << " payload=" << opt.payloadSize << " heartbeat=" << (opt.sendHeartbeat ? "on" : "off") << "\n";
 
     std::atomic<std::uint64_t> success{0};
     std::atomic<std::uint64_t> failed{0};
@@ -188,7 +189,7 @@ int main(int argc, char** argv) {
                     if (resp.msgType == MSG_ECHO) {
                         latVec.push_back(ms);
                         ++success;
-                    } else if (resp.msgType == opt.errorMsgType) {
+                    } else if (std::find(opt.errorMsgTypes.begin(), opt.errorMsgTypes.end(), resp.msgType) != opt.errorMsgTypes.end()) {
                         ++dropped;
                         threadErrorTypes[tid][resp.msgType]++;
                     } else {

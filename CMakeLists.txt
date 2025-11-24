@@ -57,4 +57,3 @@ target_link_libraries(client
         ${LUA_LIBRARIES}
         spdlog::spdlog
 )
-

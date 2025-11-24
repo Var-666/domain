@@ -1,6 +1,8 @@
 #include "Config.h"
 
 #include <iostream>
+
+#include "Util.h"
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
@@ -136,13 +138,25 @@ bool Config::parseLuaConfig(void* pL) {
         threadPoolCfg_.minThreads = static_cast<std::size_t>(getIntField(L, "minThreads", threadPoolCfg_.minThreads));
         threadPoolCfg_.maxThreads = static_cast<std::size_t>(getIntField(L, "maxThreads", threadPoolCfg_.maxThreads));
         threadPoolCfg_.maxQueueSize = static_cast<std::size_t>(getIntField(L, "maxQueueSize", threadPoolCfg_.maxQueueSize));
-
         threadPoolCfg_.autoTune = getBoolField(L, "autoTune", threadPoolCfg_.autoTune);
-
         threadPoolCfg_.highWatermark = static_cast<std::size_t>(getIntField(L, "highWatermark", threadPoolCfg_.highWatermark));
         threadPoolCfg_.lowWatermark = static_cast<std::size_t>(getIntField(L, "lowWatermark", threadPoolCfg_.lowWatermark));
         threadPoolCfg_.upThreshold = static_cast<int>(getIntField(L, "upThreshold", threadPoolCfg_.upThreshold));
         threadPoolCfg_.downThreshold = static_cast<int>(getIntField(L, "downThreshold", threadPoolCfg_.downThreshold));
+
+        // 校验并回退
+        threadPoolCfg_.workerThreadsCount = Util::ClampWithWarning<std::size_t>("threadPool.workerThreadsCount", threadPoolCfg_.workerThreadsCount, 1, 1024, 4);
+        threadPoolCfg_.minThreads = Util::ClampWithWarning<std::size_t>("threadPool.minThreads", threadPoolCfg_.minThreads, 1, 1024, 2);
+        threadPoolCfg_.maxThreads = Util::ClampWithWarning<std::size_t>("threadPool.maxThreads", threadPoolCfg_.maxThreads, threadPoolCfg_.minThreads, 2048, 8);
+        if (threadPoolCfg_.maxThreads < threadPoolCfg_.minThreads) {
+            std::cerr << "[Config] threadPool.maxThreads < minThreads, adjust maxThreads=minThreads\n";
+            threadPoolCfg_.maxThreads = threadPoolCfg_.minThreads;
+        }
+        threadPoolCfg_.maxQueueSize = Util::ClampWithWarning<std::size_t>("threadPool.maxQueueSize", threadPoolCfg_.maxQueueSize, 0, 1'000'000, 10000);
+        threadPoolCfg_.highWatermark = Util::ClampWithWarning<std::size_t>("threadPool.highWatermark", threadPoolCfg_.highWatermark, 0, threadPoolCfg_.maxQueueSize, 2000);
+        threadPoolCfg_.lowWatermark = Util::ClampWithWarning<std::size_t>("threadPool.lowWatermark", threadPoolCfg_.lowWatermark, 0, threadPoolCfg_.highWatermark, 0);
+        threadPoolCfg_.upThreshold = Util::ClampWithWarning<int>("threadPool.upThreshold", threadPoolCfg_.upThreshold, 1, 100, 3);
+        threadPoolCfg_.downThreshold = Util::ClampWithWarning<int>("threadPool.downThreshold", threadPoolCfg_.downThreshold, 1, 100, 10);
     } else {
         std::cerr << "[Config] 'config.threadPool' not found or not a table, use defaults\n";
     }
@@ -153,6 +167,9 @@ bool Config::parseLuaConfig(void* pL) {
     if (lua_istable(L, -1)) {
         limitscfg_.maxInflight = static_cast<std::size_t>(getIntField(L, "max_inflight", limitscfg_.maxInflight));
         limitscfg_.maxSendBufferBytes = static_cast<std::size_t>(getIntField(L, "max_send_buffer_bytes", limitscfg_.maxSendBufferBytes));
+
+        limitscfg_.maxInflight = Util::ClampWithWarning<std::size_t>("limits.maxInflight", limitscfg_.maxInflight, 1, 1'000'000, 10000);
+        limitscfg_.maxSendBufferBytes = Util::ClampWithWarning<std::size_t>("limits.maxSendBufferBytes", limitscfg_.maxSendBufferBytes, 1024, 1ULL << 30, 4 * 1024 * 1024);
     } else {
         std::cerr << "[Config] 'config.limits' not found or not a table, use defaults\n";
     }
@@ -178,9 +195,15 @@ bool Config::parseLuaConfig(void* pL) {
             backpressureCfg_.errorBody = lua_tostring(L, -1);
         }
         lua_pop(L, 1);  // pop errorBody
-
+        // 可选校验：lowPriorityMsgTypes/alwaysAllowMsgTypes 由 parseUint16Set 限定在 0-65535
         parseUint16Set(L, "lowPriorityMsgTypes", backpressureCfg_.lowPriorityMsgTypes);
         parseUint16Set(L, "allowMsgTypes", backpressureCfg_.alwaysAllowMsgTypes);
+
+        // 如果高低优先级未配置，保持空集合；rejectLowPriority 只有在配置了列表时才生效更合理
+        if (backpressureCfg_.rejectLowPriority && backpressureCfg_.lowPriorityMsgTypes.empty()) {
+            std::cerr << "[Config] backpressure.rejectLowPriority enabled but lowPriorityMsgTypes empty, disable it\n";
+            backpressureCfg_.rejectLowPriority = false;
+        }
     } else {
         // 可选配置，不存在则沿用默认
     }
@@ -239,6 +262,11 @@ bool Config::parseLuaConfig(void* pL) {
     if (lua_istable(L, -1)) {
         ipLimitCfg_.maxConnPerIp = static_cast<std::size_t>(getIntField(L, "maxConnPerIp", ipLimitCfg_.maxConnPerIp));
         ipLimitCfg_.maxQpsPerIp = static_cast<std::size_t>(getIntField(L, "maxQpsPerIp", ipLimitCfg_.maxQpsPerIp));
+        ipLimitCfg_.stateTtlSec = static_cast<std::uint64_t>(getIntField(L, "stateTtlSec", ipLimitCfg_.stateTtlSec));
+
+        ipLimitCfg_.maxConnPerIp = Util::ClampWithWarning<std::size_t>("ipLimit.maxConnPerIp", ipLimitCfg_.maxConnPerIp, 0, 1'000'000, 200);
+        ipLimitCfg_.maxQpsPerIp = Util::ClampWithWarning<std::size_t>("ipLimit.maxQpsPerIp", ipLimitCfg_.maxQpsPerIp, 0, 1'000'000, 0);
+        ipLimitCfg_.stateTtlSec = Util::ClampWithWarning<std::uint64_t>("ipLimit.stateTtlSec", ipLimitCfg_.stateTtlSec, 0, 86400, 300);
         parseStringSet(L, "whitelist", ipLimitCfg_.whitelist);
     }
     lua_pop(L, 1);  // pop ipLimit

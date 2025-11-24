@@ -66,6 +66,7 @@ config = {
     maxConnPerIp = 200,      -- 0 表示关闭
     maxQpsPerIp = 0,         -- 0 表示关闭
     whitelist = { "127.0.0.1" },  -- 白名单 IP 不限流
+    stateTtlSec = 300,       -- IP 计数状态 TTL（秒），0 表示不过期
   },
 
   -- 标准错误帧定义（客户端可按 msgType 识别原因）

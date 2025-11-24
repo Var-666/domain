@@ -66,6 +66,7 @@ struct IpLimitConfig {
     std::size_t maxConnPerIp = 0;   // 0 表示不限制
     std::size_t maxQpsPerIp = 0;    // 0 表示不限制
     std::unordered_set<std::string> whitelist;
+    std::uint64_t stateTtlSec = 300;  // IP 状态过期时间，0 表示不清理
 };
 
 struct ErrorFrames {
