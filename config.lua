@@ -61,6 +61,27 @@ config = {
     errorBody = 'backpressure',
   },
 
+  -- 按 IP 限制：连接数 / QPS
+  ipLimit = {
+    maxConnPerIp = 200,      -- 0 表示关闭
+    maxQpsPerIp = 0,         -- 0 表示关闭
+    whitelist = { "127.0.0.1" },  -- 白名单 IP 不限流
+  },
+
+  -- 标准错误帧定义（客户端可按 msgType 识别原因）
+  errorFrames = {
+    ipConnLimitMsgType = 65000,
+    ipConnLimitBody = 'ip_conn_limit',
+    ipQpsLimitMsgType = 65001,
+    ipQpsLimitBody = 'ip_qps_limit',
+    inflightLimitMsgType = 65002,
+    inflightLimitBody = 'inflight_limit',
+    msgRateLimitMsgType = 65003,
+    msgRateLimitBody = 'msg_rate_limit',
+    backpressureMsgType = 65535,
+    backpressureBody = 'backpressure',
+  },
+
   -- 按 msgType 的限流配置
   messageLimits = {
     -- 心跳：一般不单独限流（enabled=false）

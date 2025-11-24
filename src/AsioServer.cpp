@@ -6,7 +6,9 @@
 
 #include "AsioConnection.h"
 #include "Config.h"
+#include "IpLimiter.h"
 #include "ThreadPool.h"
+#include "Codec.h"
 
 AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, std::uint64_t idleTimeoutMs)
     : acceptor_(io_context_, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)),
@@ -73,6 +75,24 @@ void AsioServer::doAccept() {
 
     acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket socket) {
         if (!ec) {
+            // 在连接建立后、创建 AsioConnection 之前，检查这个 IP 是否已经达到最大连接数，如果超过，就立即拒绝新连接
+            auto remoteIp = socket.remote_endpoint().address().to_string();
+            const auto& ipCfg = Config::Instance().ipLimit();
+            bool ipAllowed = IpLimiter::Instance().allowConn(remoteIp);
+            if (!ipAllowed) {
+                MetricsRegistry::Instance().incIpRejectConn();
+                const auto& err = Config::Instance().errorFrames();
+                auto buf = BufferPool::Instance().acquire(64);
+                LengthHeaderCodec::send(std::make_shared<AsioConnection>(io_context_, std::move(socket)), err.ipConnLimitMsgType, err.ipConnLimitBody);
+                SPDLOG_WARN("[IpLimit] reject conn from {} (maxConnPerIp={})", remoteIp, ipCfg.maxConnPerIp);
+                
+                boost::system::error_code ignore;
+                socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ignore);
+                socket.close(ignore);
+                doAccept();
+                return;
+            }
+
             auto connection = std::make_shared<AsioConnection>(io_context_, std::move(socket), Config::Instance().limits().maxSendBufferBytes);
 
             connectionManager_.add(connection);
@@ -94,6 +114,7 @@ void AsioServer::doAccept() {
                 connectionManager_.remove(conn);
                 idleManager_.remove(conn);
                 MetricsRegistry::Instance().connections().inc(-1);
+                IpLimiter::Instance().onConnClose(conn->remoteIp());
                 if (closeCallback_) {
                     closeCallback_(conn);
                 }

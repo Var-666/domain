@@ -62,6 +62,29 @@ struct BackpressureConfig {
     std::string errorBody = "backpressure";                   // 错误帧 body
 };
 
+struct IpLimitConfig {
+    std::size_t maxConnPerIp = 0;   // 0 表示不限制
+    std::size_t maxQpsPerIp = 0;    // 0 表示不限制
+    std::unordered_set<std::string> whitelist;
+};
+
+struct ErrorFrames {
+    std::uint16_t ipConnLimitMsgType = 65000;
+    std::string ipConnLimitBody = "ip_conn_limit";
+
+    std::uint16_t ipQpsLimitMsgType = 65001;
+    std::string ipQpsLimitBody = "ip_qps_limit";
+
+    std::uint16_t inflightLimitMsgType = 65002;
+    std::string inflightLimitBody = "inflight_limit";
+
+    std::uint16_t msgRateLimitMsgType = 65003;
+    std::string msgRateLimitBody = "msg_rate_limit";
+
+    std::uint16_t backpressureMsgType = 65535;
+    std::string backpressureBody = "backpressure";
+};
+
 class Config {
   public:
     static Config& Instance();
@@ -73,6 +96,8 @@ class Config {
     const ThreadPoolConfig& threadPool() const;
     const Limits& limits() const;
     const BackpressureConfig& backpressure() const;
+    const IpLimitConfig& ipLimit() const;
+    const ErrorFrames& errorFrames() const;
     const std::unordered_map<std::uint16_t, MsgLimitConfig>& msgLimits() const;
 
   private:
@@ -86,5 +111,7 @@ class Config {
     ThreadPoolConfig threadPoolCfg_;
     Limits limitscfg_;
     BackpressureConfig backpressureCfg_;
+    IpLimitConfig ipLimitCfg_;
+    ErrorFrames errorFrames_;
     std::unordered_map<std::uint16_t, MsgLimitConfig> msgLimitsCfg_;
 };

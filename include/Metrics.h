@@ -68,6 +68,11 @@ class MetricsRegistry {
     Counter& inflightRejects();            // 因 in-flight 超限被拒绝的次数
     Counter& workerQueueSize();            // worker 队列长度（Gauge）
     Counter& workerLiveThreads();          // worker 线程活跃数量（Gauge）
+    Counter& ipRejectConn();               // IP 连接拒绝计数
+    Counter& ipRejectQps();                // IP QPS 拒绝计数
+    void incIpRejectConn();
+    void incIpRejectQps();
+
     void incMsgReject(std::uint16_t msgType);
 
     LatencyMetric& frameLatency();  // 每帧处理耗时（从 Codec 调用 handler 到返回）
@@ -95,6 +100,8 @@ class MetricsRegistry {
     Counter inflightRejects_;
     Counter workerQueueSize_;
     Counter workerLiveThreads_;
+    Counter ipRejectConn_;
+    Counter ipRejectQps_;
     std::atomic<std::uint64_t> backpressureStartMs_{0};
     mutable std::mutex msgRejectsMtx_;
     std::unordered_map<std::uint16_t, std::atomic<std::uint64_t>> msgRejects_;

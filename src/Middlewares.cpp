@@ -30,10 +30,9 @@ void RegisterMiddlewares(MessageRouter& router, const Config& cfg) {
         if (!limiter->allow(t)) {
             MetricsRegistry::Instance().totalErrors().inc();
             MetricsRegistry::Instance().incMsgReject(t);
-            if (SampleLog()) {
-                SPDLOG_WARN("[RateLimit] msgType={} dropped conn={}", t, static_cast<const void*>(ctx.conn.get()));
-            }
-            // TODO: 这里也可以回一个错误帧给客户端（需要协议约定）
+            SPDLOG_WARN("[RateLimit] msgType={} dropped conn={}", t, static_cast<const void*>(ctx.conn.get()));
+            const auto& err = Config::Instance().errorFrames();
+            LengthHeaderCodec::send(ctx.conn, err.msgRateLimitMsgType, err.msgRateLimitBody);
             return;
         }
 
@@ -67,11 +66,10 @@ void RegisterMiddlewares(MessageRouter& router, const Config& cfg) {
                     MetricsRegistry::Instance().backpressureDroppedLowPri().inc();
                     MetricsRegistry::Instance().droppedFrames().inc();
                     MetricsRegistry::Instance().incMsgReject(ctx.msgType);
-                    if (SampleLog()) {
-                        SPDLOG_WARN("[Backpressure] drop low-priority msgType={} conn={}", ctx.msgType, static_cast<const void*>(ctx.conn.get()));
-                    }
+                    SPDLOG_WARN("[Backpressure] drop low-priority msgType={} conn={}", ctx.msgType, static_cast<const void*>(ctx.conn.get()));
                     if (sendError && ctx.conn) {
-                        LengthHeaderCodec::send(ctx.conn, errorType, errorBody);
+                        const auto& err = Config::Instance().errorFrames();
+                        LengthHeaderCodec::send(ctx.conn, err.backpressureMsgType, err.backpressureBody);
                     }
                     return;
                 }

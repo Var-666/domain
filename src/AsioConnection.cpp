@@ -15,6 +15,11 @@ AsioConnection::AsioConnection(boost::asio::io_context& io_context, tcp::socket 
     lowWatermark_ = maxSendBuf_ * 0.5;
 
     readBuf_ = BufferPool::Instance().acquire(4096);
+    boost::system::error_code ec;
+    auto ep = socket_.remote_endpoint(ec);
+    if (!ec) {
+        remoteIp_ = ep.address().to_string();
+    }
 }
 
 void AsioConnection::start() {
@@ -218,6 +223,10 @@ void AsioConnection::setMessageCallback(MessageCallback cb) { messageCallback_ =
 void AsioConnection::setCloseCallback(CloseCallback cb) { closeCallback_ = std::move(cb); }
 
 boost::asio::ip::tcp::socket& AsioConnection::socket() { return socket_; }
+
+std::string AsioConnection::remoteIp() const {
+    return remoteIp_;
+}
 
 void AsioConnection::touch() {
     auto now = std::chrono::steady_clock::now().time_since_epoch();

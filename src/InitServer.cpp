@@ -6,6 +6,7 @@
 
 #include "Buffer.h"
 #include "GlobalState.h"
+#include "IpLimiter.h"
 #include "Middlewares.h"
 #include "Routes/CoreRoutes.h"
 #include "Routes/RouteRegistry.h"
@@ -19,6 +20,9 @@ InitServer::InitServer(const Config& cfg) : cfg_(cfg) {
     if (tpc.autoTune) {
         workerPool_->enableAutoTune(true);
     }
+
+    // 更新 IP 限制配置
+    IpLimiter::Instance().updateConfig(cfg_.ipLimit());
 
     // 按顺序构建组件
     router_ = buildRouter(cfg_);
@@ -62,6 +66,21 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
     auto workerPool = workerPool_;  // 拷贝一份 shared_ptr，用于 lambda 捕获
 
     auto frameCb = [router, workerPool, cfg](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+        // 先做 per-IP QPS 限流
+        auto ip = conn->remoteIp();
+        if (!ip.empty()) {
+            if (!IpLimiter::Instance().allowQps(ip)) {
+                MetricsRegistry::Instance().incIpRejectQps();
+                MetricsRegistry::Instance().droppedFrames().inc();
+                if (cfg.backpressure().sendErrorFrame) {
+                    const auto& err = cfg.errorFrames();
+                    LengthHeaderCodec::send(conn, err.ipQpsLimitMsgType, err.ipQpsLimitBody);
+                }
+                SPDLOG_WARN("[IpLimit] drop msgType={} from {} by QPS limit", msgType, ip);
+                return;
+            }
+        }
+
         MetricsRegistry::Instance().inflightFrames().inc();
 
         // 全局 in-flight 限制：按“帧”维度
@@ -72,6 +91,10 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
             MetricsRegistry::Instance().totalErrors().inc();
             MetricsRegistry::Instance().droppedFrames().inc();
             MetricsRegistry::Instance().inflightRejects().inc();
+            if (cfg.backpressure().sendErrorFrame) {
+                const auto& err = cfg.errorFrames();
+                LengthHeaderCodec::send(conn, err.inflightLimitMsgType, err.inflightLimitBody);
+            }
             SPDLOG_ERROR("too many in-flight frames, drop msgType={}", msgType);
             return;
         }

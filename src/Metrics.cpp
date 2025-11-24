@@ -119,10 +119,24 @@ Counter& MetricsRegistry::workerQueueSize() { return workerQueueSize_; }
 
 Counter& MetricsRegistry::workerLiveThreads() { return workerLiveThreads_; }
 
+Counter& MetricsRegistry::ipRejectConn() { return ipRejectConn_; }
+
+Counter& MetricsRegistry::ipRejectQps() { return ipRejectQps_; }
+
 void MetricsRegistry::incMsgReject(std::uint16_t msgType) {
     std::lock_guard<std::mutex> lock(msgRejectsMtx_);
     auto& c = msgRejects_[msgType];
     c.fetch_add(1, std::memory_order_relaxed);
+}
+
+void MetricsRegistry::incIpRejectConn() {
+    ipRejectConn_.inc();
+    totalErrors_.inc();
+}
+
+void MetricsRegistry::incIpRejectQps() {
+    ipRejectQps_.inc();
+    totalErrors_.inc();
 }
 
 LatencyMetric& MetricsRegistry::frameLatency() { return frameLatency_; }
@@ -172,6 +186,8 @@ void MetricsRegistry::printSnapshot(std::ostream& os) const {
     os << "inflightRejects   = " << inflightRejects_.value() << "\n";
     os << "workerQueueSize   = " << workerQueueSize_.value() << "\n";
     os << "workerLiveThreads   = " << workerLiveThreads_.value() << "\n";
+    os << "ipRejectConn   = " << ipRejectConn_.value() << "\n";
+    os << "ipRejectQps    = " << ipRejectQps_.value() << "\n";
     frameLatency_.print("frameLatency", os);
     os << "====================================================================================================\n";
 }
@@ -216,6 +232,12 @@ void MetricsRegistry::printPrometheus(std::ostream& os) const {
 
     os << "# TYPE server_worker_live_threads gauge\n";
     os << "server_worker_live_threads " << workerLiveThreads_.value() << "\n\n";
+
+    os << "# TYPE server_ip_reject_conn_total counter\n";
+    os << "server_ip_reject_conn_total " << ipRejectConn_.value() << "\n\n";
+
+    os << "# TYPE server_ip_reject_qps_total counter\n";
+    os << "server_ip_reject_qps_total " << ipRejectQps_.value() << "\n\n";
 
     os << "# TYPE server_inflight_frames gauge\n";
     os << "server_inflight_frames " << inflightFrames_.value() << "\n\n";

@@ -23,6 +23,20 @@ static std::int64_t getIntField(lua_State* L, const char* key, std::int64_t defa
     return v;
 }
 
+static void parseStringSet(lua_State* L, const char* key, std::unordered_set<std::string>& out) {
+    lua_getfield(L, -1, key);
+    if (lua_istable(L, -1)) {
+        lua_pushnil(L);
+        while (lua_next(L, -2) != 0) {
+            if (lua_isstring(L, -1)) {
+                out.insert(lua_tostring(L, -1));
+            }
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+}
+
 static bool getBoolField(lua_State* L, const char* key, bool def) {
     lua_getfield(L, -1, key);
     bool v = def;
@@ -82,6 +96,10 @@ const ThreadPoolConfig& Config::threadPool() const { return threadPoolCfg_; }
 const Limits& Config::limits() const { return limitscfg_; }
 
 const BackpressureConfig& Config::backpressure() const { return backpressureCfg_; }
+
+const IpLimitConfig& Config::ipLimit() const { return ipLimitCfg_; }
+
+const ErrorFrames& Config::errorFrames() const { return errorFrames_; }
 
 const std::unordered_map<std::uint16_t, MsgLimitConfig>& Config::msgLimits() const { return msgLimitsCfg_; }
 
@@ -215,6 +233,43 @@ bool Config::parseLuaConfig(void* pL) {
         lua_pop(L, 1);  // pop file
     }
     lua_pop(L, 1);
+
+    // ==== ipLimit ====
+    lua_getfield(L, -1, "ipLimit");
+    if (lua_istable(L, -1)) {
+        ipLimitCfg_.maxConnPerIp = static_cast<std::size_t>(getIntField(L, "maxConnPerIp", ipLimitCfg_.maxConnPerIp));
+        ipLimitCfg_.maxQpsPerIp = static_cast<std::size_t>(getIntField(L, "maxQpsPerIp", ipLimitCfg_.maxQpsPerIp));
+        parseStringSet(L, "whitelist", ipLimitCfg_.whitelist);
+    }
+    lua_pop(L, 1);  // pop ipLimit
+
+    // ==== errorFrames ====
+    lua_getfield(L, -1, "errorFrames");
+    if (lua_istable(L, -1)) {
+        auto parseMsg = [&](const char* keyMsgType, const char* keyBody, std::uint16_t& outType, std::string& outBody) {
+            lua_getfield(L, -1, keyMsgType);
+            if (lua_isinteger(L, -1)) {
+                auto v = lua_tointeger(L, -1);
+                if (v >= 0 && v <= 0xFFFF) {
+                    outType = static_cast<std::uint16_t>(v);
+                }
+            }
+            lua_pop(L, 1);
+
+            lua_getfield(L, -1, keyBody);
+            if (lua_isstring(L, -1)) {
+                outBody = lua_tostring(L, -1);
+            }
+            lua_pop(L, 1);
+        };
+
+        parseMsg("ipConnLimitMsgType", "ipConnLimitBody", errorFrames_.ipConnLimitMsgType, errorFrames_.ipConnLimitBody);
+        parseMsg("ipQpsLimitMsgType", "ipQpsLimitBody", errorFrames_.ipQpsLimitMsgType, errorFrames_.ipQpsLimitBody);
+        parseMsg("inflightLimitMsgType", "inflightLimitBody", errorFrames_.inflightLimitMsgType, errorFrames_.inflightLimitBody);
+        parseMsg("msgRateLimitMsgType", "msgRateLimitBody", errorFrames_.msgRateLimitMsgType, errorFrames_.msgRateLimitBody);
+        parseMsg("backpressureMsgType", "backpressureBody", errorFrames_.backpressureMsgType, errorFrames_.backpressureBody);
+    }
+    lua_pop(L, 1);  // pop errorFrames
 
     // ==== message_limits ====
     lua_getfield(L, -1, "messageLimits");  // stack: ..., config, message_limits

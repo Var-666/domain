@@ -12,6 +12,7 @@
 
 #include "Buffer.h"
 #include "ThreadPool.h"
+#include "IpLimiter.h"
 
 class AsioConnection;
 using ConnectionPtr = std::shared_ptr<AsioConnection>;
@@ -27,6 +28,8 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     explicit AsioConnection(boost::asio::io_context& io_context, tcp::socket socket, size_t maxSendBufferBytes = 4 * 1024 * 1024);
     void start();
     void close();
+
+    std::string remoteIp() const;
 
     void send(const std::string& message);
     void send(std::string_view message);
@@ -67,4 +70,5 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     size_t maxSendBuf_{0};
 
     std::atomic<std::uint64_t> lastActiveMs_{0};
+    std::string remoteIp_;
 };
