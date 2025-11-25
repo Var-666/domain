@@ -50,6 +50,11 @@ target_include_directories(domain
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Server
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/limits
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/metrics
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/util
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/middlewares
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Routes
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Util
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Client
@@ -60,6 +65,11 @@ target_include_directories(client
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Server
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/limits
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/metrics
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/util
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Server/middlewares
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Routes
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Util
         ${CMAKE_CURRENT_SOURCE_DIR}/include/Client

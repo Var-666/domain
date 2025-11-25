@@ -3,6 +3,7 @@
 #include <boost/asio.hpp>
 #include <memory>
 #include <thread>
+#include <atomic>
 
 #include "AsioServer.h"
 #include "Codec.h"
@@ -41,4 +42,5 @@ class InitServer {
     std::thread signalThread_;
 
     std::shared_ptr<ThreadPool> workerPool_;
+    std::atomic<int> inflight_{0};
 };

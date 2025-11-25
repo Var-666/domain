@@ -3,6 +3,10 @@
 #include <spdlog/spdlog.h>
 
 #include <iostream>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
 
 #include "AsioConnection.h"
 #include "Config.h"
@@ -69,12 +73,21 @@ void AsioServer::closeAllConnections() {
 }
 
 void AsioServer::doAccept() {
-    if (!acceptor_.is_open()) {
-        return;
-    }
+    boost::asio::co_spawn(io_context_, acceptLoop(), boost::asio::detached);
+}
 
-    acceptor_.async_accept([this](boost::system::error_code ec, boost::asio::ip::tcp::socket socket) {
-        if (!ec) {
+boost::asio::awaitable<void> AsioServer::acceptLoop() {
+    using boost::asio::use_awaitable;
+    try {
+        for (;;) {
+            if (!acceptor_.is_open()) {
+                co_return;
+            }
+
+            // 每个连接绑定独立 strand，确保单连接的 handler 串行执行
+            tcp::socket socket{boost::asio::make_strand(io_context_)};
+            co_await acceptor_.async_accept(socket, use_awaitable);
+
             // 在连接建立后、创建 AsioConnection 之前，检查这个 IP 是否已经达到最大连接数，如果超过，就立即拒绝新连接
             auto remoteIp = socket.remote_endpoint().address().to_string();
             const auto& ipCfg = Config::Instance().ipLimit();
@@ -82,15 +95,11 @@ void AsioServer::doAccept() {
             if (!ipAllowed) {
                 MetricsRegistry::Instance().incIpRejectConn();
                 const auto& err = Config::Instance().errorFrames();
-                auto buf = BufferPool::Instance().acquire(64);
-                LengthHeaderCodec::send(std::make_shared<AsioConnection>(io_context_, std::move(socket)), err.ipConnLimitMsgType, err.ipConnLimitBody);
+                auto rejectConn = std::make_shared<AsioConnection>(io_context_, std::move(socket));
+                LengthHeaderCodec::send(rejectConn, err.ipConnLimitMsgType, err.ipConnLimitBody);
+                rejectConn->close();
                 SPDLOG_WARN("[IpLimit] reject conn from {} (maxConnPerIp={})", remoteIp, ipCfg.maxConnPerIp);
-                
-                boost::system::error_code ignore;
-                socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ignore);
-                socket.close(ignore);
-                doAccept();
-                return;
+                continue;
             }
 
             auto connection = std::make_shared<AsioConnection>(io_context_, std::move(socket), Config::Instance().limits().maxSendBufferBytes);
@@ -122,14 +131,16 @@ void AsioServer::doAccept() {
             });
 
             connection->start();
-        } else {
-            if (ec == boost::asio::error::operation_aborted || !acceptor_.is_open()) {
-                return;  // 停止接受时触发，直接退出
-            }
-            SPDLOG_ERROR("Accept error: {}", ec.message());
         }
-        doAccept();
-    });
+    } catch (const boost::system::system_error& e) {
+        auto ec = e.code();
+        if (ec == boost::asio::error::operation_aborted || !acceptor_.is_open()) {
+            co_return;
+        }
+        SPDLOG_ERROR("Accept error: {}", ec.message());
+    } catch (const std::exception& e) {
+        SPDLOG_ERROR("Accept exception: {}", e.what());
+    }
 }
 
 void AsioServer::scheduleMetricsReport() {

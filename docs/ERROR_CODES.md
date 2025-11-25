@@ -11,6 +11,7 @@
 | `65002` | `inflight_limit` | 全局 in-flight 超限（服务过载保护）        | 短暂退避后重试，监控告警 |
 | `65003` | `msg_rate_limit` | 按 msgType 的限流命中（QPS/并发/背压拒绝） | 不立即重试或退避重试；业务可降级 |
 | `65535` | `backpressure`   | 背压状态下丢弃低优先级消息                 | 降低流量，等待背压解除 |
+| `65004` | `format_error`   | 反序列化失败（JSON/Proto 格式错误）        | 检查请求格式，修正后再发 |
 
 > 说明：上述 msgType/body 默认为 `config.lua` 中 `errorFrames` 的默认值，如有调整请同步此表与客户端。
 

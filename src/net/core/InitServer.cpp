@@ -5,9 +5,8 @@
 #include <csignal>
 
 #include "Buffer.h"
-#include "GlobalState.h"
 #include "IpLimiter.h"
-#include "Middlewares.h"
+#include "middlewares/Middlewares.h"
 #include "Routes/CoreRoutes.h"
 #include "Routes/RouteRegistry.h"
 #include <google/protobuf/empty.pb.h>
@@ -80,7 +79,7 @@ std::shared_ptr<MessageRouter> InitServer::buildRouter(const Config& cfg) {
 std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<MessageRouter>& router, const Config& cfg) {
     auto workerPool = workerPool_;  // 拷贝一份 shared_ptr，用于 lambda 捕获
 
-    auto frameCb = [router, workerPool, cfg](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+    auto frameCb = [router, workerPool, cfg, this](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
         // 先做 per-IP QPS 限流
         auto ip = conn->remoteIp();
         if (!ip.empty()) {
@@ -99,9 +98,9 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
         MetricsRegistry::Instance().inflightFrames().inc();
 
         // 全局 in-flight 限制：按“帧”维度
-        int cur = gInflight.fetch_add(1, std::memory_order_relaxed);
+        int cur = inflight_.fetch_add(1, std::memory_order_relaxed);
         if (cur >= cfg.limits().maxInflight) {
-            gInflight.fetch_sub(1, std::memory_order_relaxed);
+            inflight_.fetch_sub(1, std::memory_order_relaxed);
             MetricsRegistry::Instance().inflightFrames().inc(-1);
             MetricsRegistry::Instance().totalErrors().inc();
             MetricsRegistry::Instance().droppedFrames().inc();
@@ -116,7 +115,7 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
 
         auto weak = std::weak_ptr<AsioConnection>(conn);
         try {
-            workerPool->submit([router, weak, msgType, body]() {
+            workerPool->submit([router, weak, msgType, body, this]() {
                 if (auto shared = weak.lock()) {
                     try {
                         router->onMessage(shared, msgType, body);
@@ -127,10 +126,10 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
                     }
                 }
                 MetricsRegistry::Instance().inflightFrames().inc(-1);
-                gInflight.fetch_sub(1, std::memory_order_relaxed);
+                inflight_.fetch_sub(1, std::memory_order_relaxed);
             });
         } catch (const std::exception& ex) {
-            gInflight.fetch_sub(1, std::memory_order_relaxed);
+            inflight_.fetch_sub(1, std::memory_order_relaxed);
             MetricsRegistry::Instance().inflightFrames().inc(-1);
             MetricsRegistry::Instance().totalErrors().inc();
             SPDLOG_ERROR("ThreadPool submit failed in FrameCallback: {}", ex.what());

@@ -15,10 +15,15 @@
 
 | 路径 | 说明 |
 | --- | --- |
-| `src/` | 核心实现：AsioServer/AsioConnection/Config/Codec/Logging/Router/Middlewares/InitServer 等。 |
-| `include/` | 公共头：Buffer/ThreadPool/Metrics/ConnectionManager/MessageRouter/MessageLimiter/RouteRegistry 等。 |
-| `config.lua` | Lua 配置文件，分 server/threadPool/limits/log 四个区块。 |
-| `clientTest.cpp` | 简易客户端，用于手动验证协议或压力测试。 |
+| `src/net/` | 核心实现：AsioServer/AsioConnection/Config/Codec/Logging/Router/Middlewares/InitServer 等。 |
+| `include/Server/` | 服务端公共头：Buffer/ThreadPool/Metrics/ConnectionManager/MessageRouter/MessageLimiter/RouteRegistry 等。 |
+| `include/Routes/` | 路由声明（CoreRoutes 等）。 |
+| `include/Util/` | 工具头（配置校验等）。 |
+| `include/Client/`、`sdk/` | 客户端 SDK（GatewayClient）封装协议收发，支持 Raw/JSON/Proto。 |
+| `examples/server/` | 启动服务示例 main。 |
+| `examples/client/` | clientTest 示例，支持 raw/json/proto 压测和错误码统计。 |
+| `config/` | 默认配置、nginx 示例。 |
+| `docs/ERROR_CODES.md` | 标准错误帧（msgType/原因/处理建议）说明（客户端按此处理错误回执）。 |
 
 ```text
 ┌────────────────────────────────────────────────────────────────────┐
@@ -101,7 +106,7 @@
    ./build/server
    ```
    默认会加载工程根目录下的 `config.lua`。
-4. **验证协议**：使用 `clientTest.cpp`、`netcat` 或其他客户端发送长度帧（[4B len][2B msgType][body]），服务器会 echo 并在 stdout/log 输出。
+4. **验证协议**：使用 `examples/client/clientTest.cpp`、`GatewayClient` 或 `netcat` 发送长度帧（[4B len][2B msgType][body]），服务器会 echo 并在 stdout/log 输出。
 
 ## 🛠️ 可配置项（参考 `config.lua`）
 
