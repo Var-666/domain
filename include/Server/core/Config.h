@@ -51,6 +51,7 @@ struct MsgLimitConfig {
     bool enabled = false;
     int maxQps = 0;
     int maxConcurrent = 0;
+    int burst = 0;  // 令牌桶容量（0 表示使用 maxQps）
 };
 
 struct BackpressureConfig {
@@ -60,6 +61,7 @@ struct BackpressureConfig {
     bool sendErrorFrame = true;                               // 拒绝时是否回错误帧
     std::uint16_t errorMsgType = 0xFFFF;                      // 错误帧 msgType
     std::string errorBody = "backpressure";                   // 错误帧 body
+    std::size_t globalThreshold = 2;                          // 全局背压触发低优先级拒绝的连接数阈值
 };
 
 struct IpLimitConfig {

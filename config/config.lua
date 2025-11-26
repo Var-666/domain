@@ -55,6 +55,8 @@ config = {
     lowPriorityMsgTypes = { 2, 200 },
     -- 永远放行（心跳/管理类）
     allowMsgTypes = { 1 },
+    -- 有多少连接处于背压时开始全局拒绝低优先级
+    globalThreshold = 50,
     -- 拒绝时的错误帧（需客户端协商）：
     sendErrorFrame = true,
     errorMsgType = 65535,
@@ -65,7 +67,7 @@ config = {
   ipLimit = {
     maxConnPerIp = 200,      -- 0 表示关闭
     maxQpsPerIp = 0,         -- 0 表示关闭
-    whitelist = { "127.0.0.1" },  -- 白名单 IP 不限流
+    whitelist = {  },  -- 白名单 IP 不限流
     stateTtlSec = 300,       -- IP 计数状态 TTL（秒），0 表示不过期
   },
 
@@ -93,12 +95,14 @@ config = {
     [2] = {
       enabled = true,
       maxQps = 100000,
+      burst = 100000, -- 令牌桶容量（不填则等于 maxQps）
       maxConcurrent = 1000,
     },
     -- 以后你有重型请求，比如排行榜查询，可以限得更严
     [200] = {
       enabled = true,
       maxQps = 100,
+      burst = 100,
       maxConcurrent = 10,
     } 
   }

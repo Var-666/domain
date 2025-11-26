@@ -15,7 +15,7 @@ CoMiddleware BuildRateLimitMiddleware(const Config& cfg, std::shared_ptr<Message
 
             // 日志采样
             static thread_local uint64_t s_limitCount = 0;
-            if (++s_limitCount % 1000 == 0) {
+            if (++s_limitCount % 10000 == 0) {
                 SPDLOG_WARN("[RateLimit] Dropped (sampled): type={} conn={}", t, static_cast<const void*>(ctx->conn.get()));
             }
 

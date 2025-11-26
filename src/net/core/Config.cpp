@@ -195,6 +195,10 @@ bool Config::parseLuaConfig(void* pL) {
             backpressureCfg_.errorBody = lua_tostring(L, -1);
         }
         lua_pop(L, 1);  // pop errorBody
+        backpressureCfg_.globalThreshold =
+            Util::ClampWithWarning<std::size_t>("backpressure.globalThreshold",
+                                                static_cast<std::size_t>(getIntField(L, "globalThreshold", static_cast<int>(backpressureCfg_.globalThreshold))),
+                                                0, 1'000'000, backpressureCfg_.globalThreshold);
         // 可选校验：lowPriorityMsgTypes/alwaysAllowMsgTypes 由 parseUint16Set 限定在 0-65535
         parseUint16Set(L, "lowPriorityMsgTypes", backpressureCfg_.lowPriorityMsgTypes);
         parseUint16Set(L, "allowMsgTypes", backpressureCfg_.alwaysAllowMsgTypes);
@@ -323,9 +327,14 @@ bool Config::parseLuaConfig(void* pL) {
 
             msgLimitsCfg.maxQps = static_cast<int>(getIntField(L, "maxQps", msgLimitsCfg.maxQps));
             msgLimitsCfg.maxConcurrent = static_cast<int>(getIntField(L, "maxConcurrent", msgLimitsCfg.maxConcurrent));
+            msgLimitsCfg.burst = static_cast<int>(getIntField(L, "burst", msgLimitsCfg.burst));
 
             if (msgType >= 0 && msgType <= 0xFFFF) {
-                msgLimitsCfg_[static_cast<std::uint16_t>(msgType)] = msgLimitsCfg;
+            // clamp 数值，避免误配
+            if (msgLimitsCfg.maxQps < 0) msgLimitsCfg.maxQps = 0;
+            if (msgLimitsCfg.burst < 0) msgLimitsCfg.burst = 0;
+            if (msgLimitsCfg.maxConcurrent < 0) msgLimitsCfg.maxConcurrent = 0;
+            msgLimitsCfg_[static_cast<std::uint16_t>(msgType)] = msgLimitsCfg;
             }
 
             lua_pop(L, 1);  // pop value, 保留 key 供下次 lua_next 使用

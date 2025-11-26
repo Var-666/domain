@@ -64,6 +64,10 @@ void AsioConnection::sendBuffer(const BufferPool::Ptr& buf) {
         bool idle = sendQueue_.empty();
         sendQueueBytes_ += buf->readableBytes();
         sendQueue_.push_back(buf);
+        auto prevMax = MetricsRegistry::Instance().sendQueueMaxBytes().value();
+        if (sendQueueBytes_ > static_cast<std::size_t>(prevMax)) {
+            MetricsRegistry::Instance().sendQueueMaxBytes().inc(static_cast<std::int64_t>(sendQueueBytes_ - prevMax));
+        }
 
         // ---------- Backpressure: 触发 ----------
         if (!readPaused_.load(std::memory_order_relaxed) && sendQueueBytes_ > highWatermark_) {

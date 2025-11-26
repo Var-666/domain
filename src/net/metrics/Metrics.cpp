@@ -115,6 +115,12 @@ Counter& MetricsRegistry::backpressureDurationMs() { return backpressureDuration
 
 Counter& MetricsRegistry::inflightRejects() { return inflightRejects_; }
 
+Counter& MetricsRegistry::tokenRejects() { return tokenRejects_; }
+
+Counter& MetricsRegistry::concurrentRejects() { return concurrentRejects_; }
+
+Counter& MetricsRegistry::sendQueueMaxBytes() { return sendQueueMaxBytes_; }
+
 Counter& MetricsRegistry::workerQueueSize() { return workerQueueSize_; }
 
 Counter& MetricsRegistry::workerLiveThreads() { return workerLiveThreads_; }
@@ -184,6 +190,9 @@ void MetricsRegistry::printSnapshot(std::ostream& os) const {
     os << "backpressureDropLowPri   = " << backpressureDroppedLowPri_.value() << "\n";
     os << "backpressureDurationMs   = " << backpressureDurationMs_.value() << "\n";
     os << "inflightRejects   = " << inflightRejects_.value() << "\n";
+    os << "tokenRejects   = " << tokenRejects_.value() << "\n";
+    os << "concurrentRejects   = " << concurrentRejects_.value() << "\n";
+    os << "sendQueueMaxBytes   = " << sendQueueMaxBytes_.value() << "\n";
     os << "workerQueueSize   = " << workerQueueSize_.value() << "\n";
     os << "workerLiveThreads   = " << workerLiveThreads_.value() << "\n";
     os << "ipRejectConn   = " << ipRejectConn_.value() << "\n";
@@ -226,6 +235,15 @@ void MetricsRegistry::printPrometheus(std::ostream& os) const {
 
     os << "# TYPE server_inflight_rejects_total counter\n";
     os << "server_inflight_rejects_total " << inflightRejects_.value() << "\n\n";
+
+    os << "# TYPE server_token_rejects_total counter\n";
+    os << "server_token_rejects_total " << tokenRejects_.value() << "\n\n";
+
+    os << "# TYPE server_concurrent_rejects_total counter\n";
+    os << "server_concurrent_rejects_total " << concurrentRejects_.value() << "\n\n";
+
+    os << "# TYPE server_send_queue_max_bytes gauge\n";
+    os << "server_send_queue_max_bytes " << sendQueueMaxBytes_.value() << "\n\n";
 
     os << "# TYPE server_worker_queue_size gauge\n";
     os << "server_worker_queue_size " << workerQueueSize_.value() << "\n\n";

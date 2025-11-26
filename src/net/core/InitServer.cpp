@@ -97,7 +97,6 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
                     const auto& err = cfg.errorFrames();
                     LengthHeaderCodec::send(conn, err.ipQpsLimitMsgType, err.ipQpsLimitBody);
                 }
-                SPDLOG_WARN("[IpLimit] drop msgType={} from {} by QPS limit", msgType, ip);
                 return;
             }
         }

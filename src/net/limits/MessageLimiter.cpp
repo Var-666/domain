@@ -1,6 +1,7 @@
 #include "MessageLimiter.h"
 
 #include <spdlog/spdlog.h>
+#include "Metrics.h"
 
 void MessageLimiter::updateFromConfig(const Config& cfg) {
     const auto& cfgMap = cfg.msgLimits();
@@ -15,7 +16,8 @@ void MessageLimiter::updateFromConfig(const Config& cfg) {
             auto st = std::make_shared<PerMsgState>();
             st->cfg = limitCfg;
             st->lastRefillNs = nowNs();
-            st->tokens = limitCfg.maxQps;  // 初始充满桶
+            int burst = (limitCfg.burst > 0) ? limitCfg.burst : limitCfg.maxQps;
+            st->tokens = static_cast<double>(burst);
             states_[msgType] = std::move(st);
         } else {
             it->second->cfg = limitCfg;
@@ -37,7 +39,8 @@ bool MessageLimiter::allow(std::uint16_t msgType) {
 
     // 先检查 QPS
     if (cfg.maxQps > 0) {
-        const double capacity = static_cast<double>(std::max(1, cfg.maxQps));
+        int burst = (cfg.burst > 0) ? cfg.burst : cfg.maxQps;
+        const double capacity = static_cast<double>(std::max(1, burst));
         const double ratePerNs = static_cast<double>(cfg.maxQps) / 1'000'000'000.0;
 
         std::lock_guard<std::mutex> lock(st->mtx);
@@ -53,6 +56,7 @@ bool MessageLimiter::allow(std::uint16_t msgType) {
 
         if (st->tokens < 1.0) {
             st->dropped.fetch_add(1, std::memory_order_relaxed);
+            MetricsRegistry::Instance().tokenRejects().inc();
             return false;
         }
         st->tokens -= 1.0;
@@ -64,6 +68,7 @@ bool MessageLimiter::allow(std::uint16_t msgType) {
         if (prev >= cfg.maxConcurrent) {
             st->concurrent.fetch_sub(1, std::memory_order_relaxed);
             st->dropped.fetch_add(1, std::memory_order_relaxed);
+            MetricsRegistry::Instance().concurrentRejects().inc();
 
             // 【重要】回滚刚才扣掉的令牌 (Revert Token)
             if (cfg.maxQps > 0) {

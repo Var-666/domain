@@ -66,6 +66,9 @@ class MetricsRegistry {
     Counter& backpressureDroppedLowPri();  // 背压场景下丢弃低优先级消息
     Counter& backpressureDurationMs();     // 背压累计持续时长（ms）
     Counter& inflightRejects();            // 因 in-flight 超限被拒绝的次数
+    Counter& tokenRejects();               // 令牌桶拒绝次数
+    Counter& concurrentRejects();          // 并发超限拒绝次数
+    Counter& sendQueueMaxBytes();          // 观察到的单连接发送队列峰值（bytes，Gauge）
     Counter& workerQueueSize();            // worker 队列长度（Gauge）
     Counter& workerLiveThreads();          // worker 线程活跃数量（Gauge）
     Counter& ipRejectConn();               // IP 连接拒绝计数
@@ -102,6 +105,9 @@ class MetricsRegistry {
     Counter workerLiveThreads_;
     Counter ipRejectConn_;
     Counter ipRejectQps_;
+    Counter tokenRejects_;
+    Counter concurrentRejects_;
+    Counter sendQueueMaxBytes_;
     std::atomic<std::uint64_t> backpressureStartMs_{0};
     mutable std::mutex msgRejectsMtx_;
     std::unordered_map<std::uint16_t, std::atomic<std::uint64_t>> msgRejects_;
