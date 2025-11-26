@@ -11,12 +11,12 @@
 struct RouteEntry {
     std::uint16_t msgType;
     std::string name;
-    MessageHandler handler;
+    CoMessageHandler handler;
 };
 
 class RouteRegistry {
   public:
-    void add(std::uint16_t msgType, std::string name, MessageHandler handler) {
+    void add(std::uint16_t msgType, std::string name, CoMessageHandler handler) {
         entries_.push_back({msgType, std::move(name), std::move(handler)});
     }
 

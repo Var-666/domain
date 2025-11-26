@@ -14,7 +14,8 @@ void MessageLimiter::updateFromConfig(const Config& cfg) {
         if (it == states_.end()) {
             auto st = std::make_shared<PerMsgState>();
             st->cfg = limitCfg;
-            st->windowSec.store(nowSec(), std::memory_order_relaxed);
+            st->lastRefillNs = nowNs();
+            st->tokens = limitCfg.maxQps;  // 初始充满桶
             states_[msgType] = std::move(st);
         } else {
             it->second->cfg = limitCfg;
@@ -34,33 +35,41 @@ bool MessageLimiter::allow(std::uint16_t msgType) {
         return true;
     }
 
+    // 先检查 QPS
+    if (cfg.maxQps > 0) {
+        const double capacity = static_cast<double>(std::max(1, cfg.maxQps));
+        const double ratePerNs = static_cast<double>(cfg.maxQps) / 1'000'000'000.0;
+
+        std::lock_guard<std::mutex> lock(st->mtx);
+        auto now = nowNs();
+
+        // 计算流逝时间产生的令牌
+        auto elapsed = static_cast<double>(now - st->lastRefillNs);
+        if (elapsed > 0) {
+            double refill = elapsed * ratePerNs;
+            st->tokens = std::min(capacity, st->tokens + refill);
+            st->lastRefillNs = now;
+        }
+
+        if (st->tokens < 1.0) {
+            st->dropped.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        st->tokens -= 1.0;
+    }
+
+    // 再检查并发
     if (cfg.maxConcurrent > 0) {
         int prev = st->concurrent.fetch_add(1, std::memory_order_relaxed);
         if (prev >= cfg.maxConcurrent) {
             st->concurrent.fetch_sub(1, std::memory_order_relaxed);
             st->dropped.fetch_add(1, std::memory_order_relaxed);
-            SPDLOG_WARN("[MsgLimiter] msgType={} concurrent={} >= maxConcurrent={}", msgType, prev, cfg.maxConcurrent);
-            return false;
-        }
-    }
 
-    if (cfg.maxQps > 0) {
-        std::uint64_t nowS = nowSec();
-        std::uint64_t win = st->windowSec.load(std::memory_order_relaxed);
-        if (nowS != win) {
-            if (st->windowSec.compare_exchange_strong(win, nowS, std::memory_order_relaxed)) {
-                st->qpsCount.store(0, std::memory_order_relaxed);
+            // 【重要】回滚刚才扣掉的令牌 (Revert Token)
+            if (cfg.maxQps > 0) {
+                std::lock_guard<std::mutex> lock(st->mtx);
+                st->tokens += 1.0;
             }
-        }
-        int q = st->qpsCount.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (q > cfg.maxQps) {
-            st->dropped.fetch_add(1, std::memory_order_relaxed);
-            SPDLOG_WARN("[MsgLimiter] msgType={} qps={} > maxQps={}", msgType, q, cfg.maxQps);
-
-            if (cfg.maxConcurrent > 0) {
-                st->concurrent.fetch_sub(1, std::memory_order_relaxed);
-            }
-
             return false;
         }
     }
@@ -87,7 +96,7 @@ MessageLimiter::States MessageLimiter::getStats(std::uint16_t msgType) const {
     s.accepted = st->accepted.load(std::memory_order_relaxed);
     s.dropped = st->dropped.load(std::memory_order_relaxed);
     s.concurrent = static_cast<std::uint64_t>(st->concurrent.load(std::memory_order_relaxed));
-    s.qps = static_cast<std::uint64_t>(st->qpsCount.load(std::memory_order_relaxed));
+    s.qps = 0;  // token bucket 不直接返回窗口 qps
     return s;
 }
 
@@ -108,13 +117,14 @@ MessageLimiter::StatePtr MessageLimiter::getOrCreateState(std::uint16_t msgType)
     }
     auto st = std::make_shared<PerMsgState>();
     st->cfg = MsgLimitConfig{};
-    st->windowSec.store(nowSec(), std::memory_order_relaxed);
+    st->lastRefillNs = nowNs();
+    st->tokens = 0;
     states_[msgType] = st;
     return st;
 }
 
-std::uint64_t MessageLimiter::nowSec() {
+std::int64_t MessageLimiter::nowNs() {
     using namespace std::chrono;
-    auto now = system_clock::now().time_since_epoch();
-    return duration_cast<seconds>(now).count();
+    auto now = steady_clock::now().time_since_epoch();
+    return duration_cast<nanoseconds>(now).count();
 }

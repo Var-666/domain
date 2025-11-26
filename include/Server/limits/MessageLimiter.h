@@ -40,8 +40,9 @@ class MessageLimiter {
         MsgLimitConfig cfg;
         std::atomic<int> concurrent{0};
 
-        std::atomic<std::uint64_t> windowSec{0};
-        std::atomic<int> qpsCount{0};
+        std::mutex mtx;                      // 保护 tokens/lastRefillNs
+        double tokens{0};                       // 当前令牌数
+        std::int64_t lastRefillNs{0};        // 上次补充时间（纳秒）
 
         std::atomic<std::uint64_t> accepted{0};
         std::atomic<std::uint64_t> dropped{0};
@@ -52,7 +53,7 @@ class MessageLimiter {
     StatePtr getState(std::uint16_t msgType) const;
     StatePtr getOrCreateState(std::uint16_t msgType);
 
-    static std::uint64_t nowSec();
+    static std::int64_t nowNs();
 
   private:
     mutable std::mutex mtx_;

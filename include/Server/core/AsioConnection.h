@@ -57,6 +57,8 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     std::uint64_t lastActiveMs() const;
     // 远端 IP（缓存）。
     std::string remoteIp() const;
+    // 是否处于背压暂停读
+    bool isReadPaused() const;
 
   private:
     // 异步读循环（协程）。
@@ -72,7 +74,7 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     boost::asio::steady_timer pauseTimer_; // 背压等待唤醒定时器
 
     BufferPool::Ptr readBuf_;  // 读缓冲
-    bool readPaused_{false};   // 背压暂停读标记
+    std::atomic<bool> readPaused_{false};   // 背压暂停读标记
 
     std::size_t highWatermark_{0};  // 发送队列高水位（暂停读）
     std::size_t lowWatermark_{0};   // 发送队列低水位（恢复读）

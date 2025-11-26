@@ -2,6 +2,7 @@
 
 #include "Codec.h"
 #include "RouteRegistry.h"
+#include <boost/asio/awaitable.hpp>
 
 enum : std::uint16_t {
     MSG_HEARTBEAT = 1,
@@ -13,14 +14,16 @@ enum : std::uint16_t {
 namespace CoreRoutes {
     inline void Register(RouteRegistry& registry) {
         // 心跳
-        registry.add(MSG_HEARTBEAT, "heartbeat", [](const ConnectionPtr& conn, const std::string& body) {
-
+        registry.add(MSG_HEARTBEAT, "heartbeat", [](const ConnectionPtr& /*conn*/, std::string_view /*body*/) -> boost::asio::awaitable<void> {
+            co_return;
         });
 
         // echo
-        registry.add(MSG_ECHO, "echo", [](const ConnectionPtr& conn, const std::string& body) {
-            std::string resp = "echo" + body;
+        registry.add(MSG_ECHO, "echo", [](const ConnectionPtr& conn, std::string_view body) -> boost::asio::awaitable<void> {
+            std::string resp = "echo";
+            resp.append(body);
             LengthHeaderCodec::send(conn, MSG_ECHO, resp);
+            co_return;
         });
     }
 }  // namespace CoreRoutes

@@ -2,14 +2,15 @@
 
 #include <spdlog/spdlog.h>
 
-Middleware BuildLoggingMiddleware(const Config& cfg) {
+CoMiddleware BuildLoggingMiddleware(const Config& cfg) {
     const auto& logCfg = cfg.log();
     bool debugLogEnabled = (logCfg.level == "debug" || logCfg.level == "trace");
     if (!debugLogEnabled) {
         return {};
     }
-    return [](MessageContext& ctx, NextFunc next) {
-        SPDLOG_DEBUG("recv msgType={} bodySize={}", ctx.msgType, ctx.body ? ctx.body->size() : 0);
-        next(ctx);
+    return [](std::shared_ptr<MessageContext> ctx, CoNextFunc next) -> boost::asio::awaitable<void> {
+        SPDLOG_DEBUG("recv msgType={} bodySize={}", ctx->msgType, ctx->body ? ctx->body->size() : 0);
+        co_await next(ctx);
+        co_return;
     };
 }

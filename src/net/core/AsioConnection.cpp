@@ -66,8 +66,8 @@ void AsioConnection::sendBuffer(const BufferPool::Ptr& buf) {
         sendQueue_.push_back(buf);
 
         // ---------- Backpressure: 触发 ----------
-        if (!readPaused_ && sendQueueBytes_ > highWatermark_) {
-            readPaused_ = true;
+        if (!readPaused_.load(std::memory_order_relaxed) && sendQueueBytes_ > highWatermark_) {
+            readPaused_.store(true, std::memory_order_relaxed);
             pauseTimer_.expires_at(std::chrono::steady_clock::time_point::max());
             MetricsRegistry::Instance().onBackpressureEnter();
             SPDLOG_WARN("[Backpressure] Pause read: queueBytes={} high={}", sendQueueBytes_, highWatermark_);
@@ -92,7 +92,7 @@ boost::asio::awaitable<void> AsioConnection::readLoop() {
             if (closing_) {
                 co_return;
             }
-            if (readPaused_) {
+            if (readPaused_.load(std::memory_order_relaxed)) {
                 // 重置为“永不过期”，避免上次取消后的立即触发
                 pauseTimer_.expires_at(std::chrono::steady_clock::time_point::max());
                 boost::system::error_code ec;
@@ -177,9 +177,9 @@ boost::asio::awaitable<void> AsioConnection::writeLoop() {
             sendQueueBytes_ -= bytesToSend;
             MetricsRegistry::Instance().bytesOut().inc(bytesToSend);
 
-            if (readPaused_ && sendQueueBytes_ <= lowWatermark_) {
+            if (readPaused_.load(std::memory_order_relaxed) && sendQueueBytes_ <= lowWatermark_) {
                 if (!closing_) {
-                    readPaused_ = false;
+                    readPaused_.store(false, std::memory_order_relaxed);
                     pauseTimer_.cancel();
                     MetricsRegistry::Instance().onBackpressureExit();
                 }
@@ -197,8 +197,8 @@ void AsioConnection::handleClose() {
         return;
     closing_ = true;
 
-    if (readPaused_) {
-        readPaused_ = false;
+    if (readPaused_.load(std::memory_order_relaxed)) {
+        readPaused_.store(false, std::memory_order_relaxed);
         pauseTimer_.cancel_one();
         MetricsRegistry::Instance().onBackpressureExit();
     }
@@ -230,3 +230,5 @@ void AsioConnection::touch() {
 }
 
 std::uint64_t AsioConnection::lastActiveMs() const { return lastActiveMs_.load(std::memory_order_relaxed); }
+
+bool AsioConnection::isReadPaused() const { return readPaused_.load(std::memory_order_relaxed); }

@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <csignal>
+#include <boost/asio/awaitable.hpp>
 
 #include "Buffer.h"
 #include "IpLimiter.h"
@@ -57,21 +58,27 @@ std::shared_ptr<MessageRouter> InitServer::buildRouter(const Config& cfg) {
     routes.applyTo(*router);
 
     // JSON 路由示例
-    router->registerJson(MSG_JSON_ECHO, [](const ConnectionPtr& conn, const nlohmann::json& j) {
+    router->registerJson(MSG_JSON_ECHO, [](const ConnectionPtr& conn, const nlohmann::json& j) -> boost::asio::awaitable<void> {
         nlohmann::json resp;
         resp["echo"] = j;
         LengthHeaderCodec::send(conn, MSG_JSON_ECHO, resp.dump());
+        co_return;
     });
 
     // Protobuf 路由示例（使用 google.protobuf.Empty）
-    router->registerProto<google::protobuf::Empty>(MSG_PROTO_PING, [](const ConnectionPtr& conn, const google::protobuf::Empty&) {
+    router->registerProto<google::protobuf::Empty>(MSG_PROTO_PING,
+        [](const ConnectionPtr& conn, const google::protobuf::Empty&) -> boost::asio::awaitable<void> {
         google::protobuf::Empty resp;
         LengthHeaderCodec::send(conn, MSG_PROTO_PING, resp.SerializeAsString());
+        co_return;
     });
 
     // 3. 默认 handler
     router->setDefaultHandler(
-        [](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) { SPDLOG_WARN("Unknown msgType={} bodySize={}", msgType, body.size()); });
+        [](const ConnectionPtr& /*conn*/, uint16_t msgType, const std::string& body) -> boost::asio::awaitable<void> {
+            SPDLOG_WARN("Unknown msgType={} bodySize={}", msgType, body.size());
+            co_return;
+        });
 
     return router;
 }

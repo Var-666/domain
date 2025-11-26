@@ -21,18 +21,19 @@ void RegisterMiddlewares(MessageRouter& router, const Config& cfg) {
         router.use(bpMw);
     }
 
-    // === 中间件 ：简单日志（可按配置开启/关闭） ===
+    // === 中间件 ：简单日志 ===
     auto logMw = BuildLoggingMiddleware(cfg);
     if (logMw) {
         router.use(logMw);
     }
 
     // === 中间件 ：预留一个“鉴权/会话校验”位（现在可以是空壳） ===
-    router.use([](MessageContext& ctx, NextFunc next) {
+    router.use([](std::shared_ptr<MessageContext> ctx, CoNextFunc next) -> boost::asio::awaitable<void> {
         // TODO: 将来在这里做：
         //  - 解析 token / session
         //  - 从 ctx.conn 的某个 userData 里拿用户信息
         //  - 没权限就 return，别调 next
-        next(ctx);
+        co_await next(ctx);
+        co_return;
     });
 }

@@ -5,7 +5,7 @@
 #include "Codec.h"
 #include "Metrics.h"
 
-Middleware BuildBackpressureMiddleware(const Config& cfg) {
+CoMiddleware BuildBackpressureMiddleware(const Config& cfg) {
     const auto& bpCfg = cfg.backpressure();
     if (!(bpCfg.rejectLowPriority && !bpCfg.lowPriorityMsgTypes.empty())) {
         return {};
@@ -13,27 +13,38 @@ Middleware BuildBackpressureMiddleware(const Config& cfg) {
 
     auto lowPri = bpCfg.lowPriorityMsgTypes;
     auto allow = bpCfg.alwaysAllowMsgTypes;
-    bool sendError = bpCfg.sendErrorFrame;
+    constexpr std::size_t kGlobalBpThreshold = 100;  // 全局背压触发低优先级拒绝的最小触发连接数
 
-    return [lowPri, allow, sendError](MessageContext& ctx, NextFunc next) {
-        // 背压激活：当前有连接处于 read pause
-        if (MetricsRegistry::Instance().backpressureActive().value() > 0) {
-            if (!allow.empty() && allow.find(ctx.msgType) != allow.end()) {
-                next(ctx);
-                return;
+    return [lowPri = std::move(lowPri), allow = std::move(allow), kGlobalBpThreshold](std::shared_ptr<MessageContext> ctx, CoNextFunc next) -> boost::asio::awaitable<void> {
+        // 获取全局以及连接背压情况
+        bool isSelfCongested = ctx->conn && ctx->conn->isReadPaused();
+        bool isGlobalPanic = false;
+
+        if (!isSelfCongested) {
+            auto globalBp = MetricsRegistry::Instance().backpressureActive().value();
+            isGlobalPanic = (globalBp > kGlobalBpThreshold);
+        }
+
+        if (isSelfCongested || isGlobalPanic) {
+            // 白名单检查
+            if (!allow.empty() && allow.find(ctx->msgType) != allow.end()) {
+                co_await next(ctx);
+                co_return;
             }
-            if (lowPri.find(ctx.msgType) != lowPri.end()) {
+            if (lowPri.find(ctx->msgType) != lowPri.end()) {
                 MetricsRegistry::Instance().backpressureDroppedLowPri().inc();
                 MetricsRegistry::Instance().droppedFrames().inc();
-                MetricsRegistry::Instance().incMsgReject(ctx.msgType);
-                SPDLOG_WARN("[Backpressure] drop low-priority msgType={} conn={}", ctx.msgType, static_cast<const void*>(ctx.conn.get()));
-                if (sendError && ctx.conn) {
-                    const auto& err = Config::Instance().errorFrames();
-                    LengthHeaderCodec::send(ctx.conn, err.backpressureMsgType, err.backpressureBody);
+                MetricsRegistry::Instance().incMsgReject(ctx->msgType);
+
+                // 日志采样
+                static thread_local uint64_t s_dropCount = 0;
+                if (++s_dropCount % 1000 == 0) {
+                    SPDLOG_WARN("[Backpressure] Dropping low-pri (sampled): type={} selfPaused={} globalPanic={}", ctx->msgType, isSelfCongested, isGlobalPanic);
                 }
-                return;
+                co_return;
             }
         }
-        next(ctx);
+        co_await next(ctx);
+        co_return;
     };
 }

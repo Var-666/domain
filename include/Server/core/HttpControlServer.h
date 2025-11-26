@@ -1,6 +1,7 @@
 #pragma once
 
 #include <boost/asio.hpp>
+#include <boost/asio/awaitable.hpp>
 #include <functional>
 #include <memory>
 #include <string>
@@ -18,7 +19,8 @@ class HttpControlServer {
 
   private:
     void doAccept();
-    void handleSession(std::shared_ptr<tcp::socket> sock);
+    boost::asio::awaitable<void> acceptLoop();
+    boost::asio::awaitable<void> handleSession(std::shared_ptr<tcp::socket> sock);
     std::string handleRequest(const std::string& request);
     std::string buildResponse(int statusCode, const std::string& statusText, const std::string& body,
                               const std::string& contentType = "text/plain; charset=utf-8");
