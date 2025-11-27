@@ -35,11 +35,14 @@ CoMiddleware BuildBackpressureMiddleware(const Config& cfg) {
                 MetricsRegistry::Instance().backpressureDroppedLowPri().inc();
                 MetricsRegistry::Instance().droppedFrames().inc();
                 MetricsRegistry::Instance().incMsgReject(ctx->msgType);
+                MetricsRegistry::Instance().setBackpressureDropTrace(ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "");
+                MetricsRegistry::Instance().setMsgRejectTrace(ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "", ctx->msgType);
 
                 // 日志采样
                 static thread_local uint64_t s_dropCount = 0;
                 if (++s_dropCount % 10000 == 0) {
-                    SPDLOG_WARN("[Backpressure] Dropping low-pri (sampled): type={} selfPaused={} globalPanic={}", ctx->msgType, isSelfCongested, isGlobalPanic);
+                    SPDLOG_WARN("[Backpressure] Dropping low-pri (sampled): type={} selfPaused={} globalPanic={} trace={} sess={}", ctx->msgType,
+                                isSelfCongested, isGlobalPanic, ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "nil");
                 }
                 co_return;
             }

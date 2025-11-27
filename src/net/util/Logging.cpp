@@ -4,10 +4,12 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
+#include <spdlog/pattern_formatter.h>
 
 #include <vector>
 
 #include "Config.h"
+#include "TraceContext.h"
 
 namespace Logging {
     static spdlog::level::level_enum ParseLevel(const std::string& lvl) {
@@ -63,6 +65,7 @@ namespace Logging {
         logger->set_level(ParseLevel(cfg.level));
         logger->flush_on(spdlog::level::warn);
 
+        // sinks 会 clone formatter
         spdlog::set_default_logger(logger);
         spdlog::set_level(ParseLevel(cfg.level));
 

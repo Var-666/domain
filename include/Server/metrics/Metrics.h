@@ -75,6 +75,15 @@ class MetricsRegistry {
     Counter& ipRejectQps();                // IP QPS 拒绝计数
     void incIpRejectConn();
     void incIpRejectQps();
+    void setTokenRejectTrace(const std::string& traceId, const std::string& sessionId);
+    void setConcurrentRejectTrace(const std::string& traceId, const std::string& sessionId);
+    void setBackpressureDropTrace(const std::string& traceId, const std::string& sessionId);
+    void setInflightRejectTrace(const std::string& traceId, const std::string& sessionId);
+    void setIpRejectConnTrace(const std::string& traceId, const std::string& sessionId);
+    void setIpRejectQpsTrace(const std::string& traceId, const std::string& sessionId);
+    void setMsgRejectTrace(const std::string& traceId, const std::string& sessionId, std::uint16_t msgType);
+    void setTotalErrorTrace(const std::string& traceId, const std::string& sessionId);
+    void setFrameLatencyTrace(const std::string& traceId, const std::string& sessionId, double latencyMs);
 
     void incMsgReject(std::uint16_t msgType);
 
@@ -108,6 +117,35 @@ class MetricsRegistry {
     Counter tokenRejects_;
     Counter concurrentRejects_;
     Counter sendQueueMaxBytes_;
+    mutable std::mutex exemplarMtx_;
+    std::string lastTokenRejectTrace_;
+    std::string lastTokenRejectSession_;
+    std::int64_t lastTokenRejectValue_{0};
+    std::string lastConcurrentRejectTrace_;
+    std::string lastConcurrentRejectSession_;
+    std::int64_t lastConcurrentRejectValue_{0};
+    std::string lastBackpressureTrace_;
+    std::string lastBackpressureSession_;
+    std::int64_t lastBackpressureDropValue_{0};
+    std::string lastInflightRejectTrace_;
+    std::string lastInflightRejectSession_;
+    std::int64_t lastInflightRejectValue_{0};
+    std::string lastIpRejectConnTrace_;
+    std::string lastIpRejectConnSession_;
+    std::int64_t lastIpRejectConnValue_{0};
+    std::string lastIpRejectQpsTrace_;
+    std::string lastIpRejectQpsSession_;
+    std::int64_t lastIpRejectQpsValue_{0};
+    std::string lastMsgRejectTrace_;
+    std::string lastMsgRejectSession_;
+    std::uint16_t lastMsgRejectType_{0};
+    std::int64_t lastMsgRejectValue_{0};
+    std::string lastTotalErrorTrace_;
+    std::string lastTotalErrorSession_;
+    std::int64_t lastTotalErrorValue_{0};
+    std::string lastFrameLatencyTrace_;
+    std::string lastFrameLatencySession_;
+    double lastFrameLatencyMs_{0.0};
     std::atomic<std::uint64_t> backpressureStartMs_{0};
     mutable std::mutex msgRejectsMtx_;
     std::unordered_map<std::uint16_t, std::atomic<std::uint64_t>> msgRejects_;

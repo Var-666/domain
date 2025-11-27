@@ -1,0 +1,149 @@
+{
+  "title": "Gateway Ops Dashboard",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Summary",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Connections",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_connections" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Errors",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_total_errors" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Token Rejects",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_token_rejects_total" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Concurrent Rejects",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_concurrent_rejects_total" } ]
+    },
+
+    {
+      "type": "row",
+      "title": "Protectors (Limit/Backpressure/IP)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+    },
+    {
+      "type": "stat",
+      "title": "Backpressure Drops",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_backpressure_drop_lowpri" } ]
+    },
+    {
+      "type": "stat",
+      "title": "Inflight Rejects",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_inflight_rejects_total" } ]
+    },
+    {
+      "type": "stat",
+      "title": "IP Reject Conn",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_ip_reject_conn_total" } ]
+    },
+    {
+      "type": "stat",
+      "title": "IP Reject QPS",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [ { "expr": "server_ip_reject_qps_total" } ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Msg Reject by Type",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+      "datasource": "Prometheus",
+      "options": { "legend": { "displayMode": "table" } },
+      "targets": [
+        { "expr": "increase(server_msg_reject_total[5m])", "legendFormat": "{{msgType}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Backpressure Active / Duration",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "server_backpressure_active", "legendFormat": "active" },
+        { "expr": "rate(server_backpressure_duration_ms[5m])", "legendFormat": "duration_ms_rate" }
+      ]
+    },
+
+    {
+      "type": "row",
+      "title": "Performance",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Frame Latency p50/p95/p99",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(server_frame_latency_ms_bucket[1m]))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, rate(server_frame_latency_ms_bucket[1m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, rate(server_frame_latency_ms_bucket[1m]))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Frame Throughput & Inflight",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(server_total_frames[1m])", "legendFormat": "frames/s" },
+        { "expr": "server_inflight_frames", "legendFormat": "inflight" }
+      ]
+    },
+
+    {
+      "type": "row",
+      "title": "I/O & Resources",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Bytes In/Out",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(server_bytes_in[1m])", "legendFormat": "bytes_in/s" },
+        { "expr": "rate(server_bytes_out[1m])", "legendFormat": "bytes_out/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Send Queue Max Bytes",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "server_send_queue_max_bytes", "legendFormat": "max_bytes" }
+      ]
+    }
+  ]
+}

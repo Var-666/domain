@@ -14,11 +14,45 @@
 #include <string>
 
 #include "Metrics.h"
+#include "TraceContext.h"
+
+namespace {
+    std::string makeUuid() {
+        static thread_local std::mt19937_64 rng{std::random_device{}()};
+        std::uniform_int_distribution<uint64_t> dist;
+
+        uint64_t part1 = dist(rng);
+        uint64_t part2 = dist(rng);
+
+        // 拆成标准 UUID 的五段：8-4-4-4-12
+        uint32_t time_low = static_cast<uint32_t>(part1 >> 32);
+        uint16_t time_mid = static_cast<uint16_t>((part1 >> 16) & 0xFFFF);
+        uint16_t time_hi = static_cast<uint16_t>(part1 & 0xFFFF);
+        uint16_t clock_seq = static_cast<uint16_t>(part2 >> 48);
+        uint64_t node = part2 & 0xFFFFFFFFFFFFull;
+
+        // 设置 version = 4（time_hi_and_version）
+        time_hi &= 0x0FFF;
+        time_hi |= 0x4000;  // 0100 xxxx xxxx xxxx
+
+        // 设置 variant（clock_seq_hi_and_reserved 的高位 = 10xx）
+        clock_seq &= 0x3FFF;
+        clock_seq |= 0x8000;  // 10xx xxxx xxxx xxxx
+
+        std::ostringstream oss;
+        oss << std::hex << std::nouppercase << std::setfill('0') << std::setw(8) << time_low << '-' << std::setw(4) << time_mid << '-' << std::setw(4) << time_hi << '-' << std::setw(4) << clock_seq
+            << '-' << std::setw(12) << node;
+
+        return oss.str();
+    }
+}  // namespace
 
 AsioConnection::AsioConnection(boost::asio::io_context& io_context, tcp::socket socket, size_t maxSendBufferBytes)
     : io_context_(io_context), socket_(std::move(socket)), pauseTimer_(socket_.get_executor()), maxSendBuf_(maxSendBufferBytes) {
     highWatermark_ = maxSendBuf_ * 0.8;
     lowWatermark_ = maxSendBuf_ * 0.5;
+    sessionId_ = makeUuid();
+    traceId_ = sessionId_;
 
     readBuf_ = BufferPool::Instance().acquire(4096);
     boost::system::error_code ec;
@@ -41,7 +75,8 @@ void AsioConnection::send(std::string_view message) {
     }
     // per-connection 发送缓存上限控制
     if (maxSendBuf_ > 0 && sendQueueBytes_ + message.size() > maxSendBuf_) {
-        SPDLOG_ERROR("[AsioConnection] send buffer overflow, drop message, size= {}", message.size());
+        TraceContext::Guard g(traceId_, sessionId_);
+        SPDLOG_ERROR("[AsioConnection] send buffer overflow, drop message, size={}, trace={}, sess={}", message.size(), traceId_, sessionId_);
         return;
     }
 
@@ -74,7 +109,8 @@ void AsioConnection::sendBuffer(const BufferPool::Ptr& buf) {
             readPaused_.store(true, std::memory_order_relaxed);
             pauseTimer_.expires_at(std::chrono::steady_clock::time_point::max());
             MetricsRegistry::Instance().onBackpressureEnter();
-            SPDLOG_WARN("[Backpressure] Pause read: queueBytes={} high={}", sendQueueBytes_, highWatermark_);
+            TraceContext::Guard g(traceId_, sessionId_);
+            SPDLOG_WARN("[Backpressure] Pause read: queueBytes={} high={} trace={} sess={}", sendQueueBytes_, highWatermark_, traceId_, sessionId_);
         }
 
         if (idle && !writing_) {
@@ -105,7 +141,8 @@ boost::asio::awaitable<void> AsioConnection::readLoop() {
                     // 被 cancel 唤醒，继续下一轮检查
                     continue;
                 } else if (ec) {
-                    SPDLOG_ERROR("pauseTimer error: {}", ec.message());
+                    TraceContext::Guard g(traceId_, sessionId_);
+                    SPDLOG_ERROR("pauseTimer error: {} trace={} sess={}", ec.message(), traceId_, sessionId_);
                     co_return;
                 }
                 // 正常超时（理论上不会发生）也继续下一轮
@@ -129,11 +166,13 @@ boost::asio::awaitable<void> AsioConnection::readLoop() {
         auto ec = e.code();
         if (ec == boost::asio::error::eof || ec == boost::asio::error::connection_reset || ec == boost::asio::error::operation_aborted) {
         } else {
-            SPDLOG_ERROR("Read error: {}", ec.message());
+            TraceContext::Guard g(traceId_, sessionId_);
+            SPDLOG_ERROR("Read error: {} trace={} sess={}", ec.message(), traceId_, sessionId_);
         }
         handleClose();
     } catch (const std::exception& e) {
-        SPDLOG_ERROR("Read exception: {}", e.what());
+        TraceContext::Guard g(traceId_, sessionId_);
+        SPDLOG_ERROR("Read exception: {} trace={} sess={}", e.what(), traceId_, sessionId_);
         handleClose();
     }
 }
@@ -190,7 +229,8 @@ boost::asio::awaitable<void> AsioConnection::writeLoop() {
             }
         }
     } catch (const std::exception& e) {
-        SPDLOG_ERROR("Write exception: {}", e.what());
+        TraceContext::Guard g(traceId_, sessionId_);
+        SPDLOG_ERROR("Write exception: {} trace={} sess={}", e.what(), traceId_, sessionId_);
         handleClose();
     }
     writing_ = false;
@@ -203,7 +243,7 @@ void AsioConnection::handleClose() {
 
     if (readPaused_.load(std::memory_order_relaxed)) {
         readPaused_.store(false, std::memory_order_relaxed);
-        pauseTimer_.cancel_one();
+        pauseTimer_.cancel();
         MetricsRegistry::Instance().onBackpressureExit();
     }
 
@@ -226,6 +266,8 @@ void AsioConnection::setCloseCallback(CloseCallback cb) { closeCallback_ = std::
 
 boost::asio::ip::tcp::socket& AsioConnection::socket() { return socket_; }
 std::string AsioConnection::remoteIp() const { return remoteIp_; }
+std::string AsioConnection::sessionId() const { return sessionId_; }
+std::string AsioConnection::traceId() const { return traceId_; }
 
 void AsioConnection::touch() {
     auto now = std::chrono::steady_clock::now().time_since_epoch();

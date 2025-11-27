@@ -4,6 +4,8 @@
 
 #include <boost/asio/detached.hpp>
 
+#include "TraceContext.h"
+
 void MessageRouter::registerHandler(std::uint16_t msgType, CoMessageHandler handler) {
     std::lock_guard<std::mutex> lock(mtx_);
     HandlerEntry entry;
@@ -35,18 +37,20 @@ void MessageRouter::onMessage(const ConnectionPtr& conn, std::uint16_t msgType, 
     ctx->conn = conn;
     ctx->msgType = msgType;
     ctx->body = std::make_shared<std::string>(body);
+    ctx->traceId = conn ? conn->traceId() : "";
 
     try {
         auto exec = conn->socket().get_executor();
         boost::asio::co_spawn(exec, dispatch(0, ctx), boost::asio::detached);
     } catch (const std::exception& ex) {
-        SPDLOG_ERROR("MessageRouter::onMessage exception: {}", ex.what());
+        SPDLOG_ERROR("MessageRouter::onMessage exception: {} trace={} sess={}", ex.what(), ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "nil");
     } catch (...) {
-        SPDLOG_ERROR("MessageRouter::onMessage unknown exception");
+        SPDLOG_ERROR("MessageRouter::onMessage unknown exception trace={} sess={}", ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "nil");
     }
 }
 
 boost::asio::awaitable<void> MessageRouter::dispatch(std::size_t idx, std::shared_ptr<MessageContext> ctx) {
+    TraceContext::Guard guard(ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "");
     // 如果还有 middleware，先执行 middleware[idx]
     if (idx < middlewares_.size()) {
         CoMiddleware mw = middlewares_[idx];
@@ -73,7 +77,8 @@ boost::asio::awaitable<void> MessageRouter::dispatch(std::size_t idx, std::share
                     auto json = nlohmann::json::parse(*ctx->body);
                     co_await handler.jsonHandler(ctx->conn, json);
                 } catch (const std::exception& ex) {
-                    SPDLOG_WARN("Json parse failed for msgType={}, err={}", ctx->msgType, ex.what());
+                    SPDLOG_WARN("Json parse failed for msgType={}, err={} trace={} sess={}", ctx->msgType, ex.what(), ctx->traceId,
+                                ctx->conn ? ctx->conn->sessionId() : "nil");
                 }
             }
             break;
@@ -83,12 +88,12 @@ boost::asio::awaitable<void> MessageRouter::dispatch(std::size_t idx, std::share
                 if (msg && msg->ParseFromString(*ctx->body)) {
                     co_await handler.protoHandler(ctx->conn, *msg);
                 } else {
-                    SPDLOG_WARN("Proto parse failed for msgType={}", ctx->msgType);
+                SPDLOG_WARN("Proto parse failed for msgType={} trace={} sess={}", ctx->msgType, ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "nil");
                 }
             }
             break;
         default:
-            SPDLOG_WARN("No handler for msgType={}", ctx->msgType);
+    SPDLOG_WARN("No handler for msgType={} trace={} sess={}", ctx->msgType, ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "nil");
             break;
     }
     co_return;

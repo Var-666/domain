@@ -94,7 +94,7 @@ void ThreadPool::resize(std::size_t newCount) {
         std::size_t reduce = old - newCount;
         targetThreads_ = newCount;
         threadsToStop_ += reduce;
-        SPDLOG_INFO("ThreadPool resize shrink: {} -> {}, threadsToStop_={}", old, newCount, threadsToStop_);
+        // SPDLOG_INFO("ThreadPool resize shrink: {} -> {}, threadsToStop_={}", old, newCount, threadsToStop_);
         cv_.notify_all();
     }
 }

@@ -12,11 +12,13 @@ CoMiddleware BuildRateLimitMiddleware(const Config& cfg, std::shared_ptr<Message
         if (!limiter->allow(t)) {
             MetricsRegistry::Instance().totalErrors().inc();
             MetricsRegistry::Instance().incMsgReject(t);
+            MetricsRegistry::Instance().setMsgRejectTrace(ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "", t);
+            MetricsRegistry::Instance().setTokenRejectTrace(ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "");
 
             // 日志采样
             static thread_local uint64_t s_limitCount = 0;
             if (++s_limitCount % 10000 == 0) {
-                SPDLOG_WARN("[RateLimit] Dropped (sampled): type={} conn={}", t, static_cast<const void*>(ctx->conn.get()));
+                SPDLOG_WARN("[RateLimit] Dropped (sampled): type={} trace={} sess={}", t, ctx->traceId, ctx->conn ? ctx->conn->sessionId() : "nil");
             }
 
             co_return;

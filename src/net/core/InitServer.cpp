@@ -1,17 +1,18 @@
 #include "InitServer.h"
 
+#include <google/protobuf/empty.pb.h>
 #include <spdlog/spdlog.h>
 
-#include <csignal>
 #include <boost/asio/awaitable.hpp>
+#include <csignal>
+#include <nlohmann/json.hpp>
 
 #include "Buffer.h"
 #include "IpLimiter.h"
-#include "middlewares/Middlewares.h"
 #include "Routes/CoreRoutes.h"
 #include "Routes/RouteRegistry.h"
-#include <google/protobuf/empty.pb.h>
-#include <nlohmann/json.hpp>
+#include "TraceContext.h"
+#include "middlewares/Middlewares.h"
 
 InitServer::InitServer(const Config& cfg) : cfg_(cfg) {
     // 1. 先建线程池（用前面 Lua 配置里的 thread_pool）
@@ -66,19 +67,17 @@ std::shared_ptr<MessageRouter> InitServer::buildRouter(const Config& cfg) {
     });
 
     // Protobuf 路由示例（使用 google.protobuf.Empty）
-    router->registerProto<google::protobuf::Empty>(MSG_PROTO_PING,
-        [](const ConnectionPtr& conn, const google::protobuf::Empty&) -> boost::asio::awaitable<void> {
+    router->registerProto<google::protobuf::Empty>(MSG_PROTO_PING, [](const ConnectionPtr& conn, const google::protobuf::Empty&) -> boost::asio::awaitable<void> {
         google::protobuf::Empty resp;
         LengthHeaderCodec::send(conn, MSG_PROTO_PING, resp.SerializeAsString());
         co_return;
     });
 
     // 3. 默认 handler
-    router->setDefaultHandler(
-        [](const ConnectionPtr& /*conn*/, uint16_t msgType, const std::string& body) -> boost::asio::awaitable<void> {
-            SPDLOG_WARN("Unknown msgType={} bodySize={}", msgType, body.size());
-            co_return;
-        });
+    router->setDefaultHandler([](const ConnectionPtr& /*conn*/, uint16_t msgType, const std::string& body) -> boost::asio::awaitable<void> {
+        SPDLOG_WARN("Unknown msgType={} bodySize={}", msgType, body.size());
+        co_return;
+    });
 
     return router;
 }
@@ -87,16 +86,19 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
     auto workerPool = workerPool_;  // 拷贝一份 shared_ptr，用于 lambda 捕获
 
     auto frameCb = [router, workerPool, cfg, this](const ConnectionPtr& conn, uint16_t msgType, const std::string& body) {
+        TraceContext::Guard guard(conn->traceId(), conn->sessionId());
         // 先做 per-IP QPS 限流
         auto ip = conn->remoteIp();
         if (!ip.empty()) {
             if (!IpLimiter::Instance().allowQps(ip)) {
                 MetricsRegistry::Instance().incIpRejectQps();
+                MetricsRegistry::Instance().setIpRejectQpsTrace(conn->traceId(), conn->sessionId());
                 MetricsRegistry::Instance().droppedFrames().inc();
                 if (cfg.backpressure().sendErrorFrame) {
                     const auto& err = cfg.errorFrames();
                     LengthHeaderCodec::send(conn, err.ipQpsLimitMsgType, err.ipQpsLimitBody);
                 }
+                SPDLOG_WARN("[IpLimit] QPS reject msgType={} ip={} trace={} sess={}", msgType, ip, conn->traceId(), conn->sessionId());
                 return;
             }
         }
@@ -109,13 +111,15 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
             inflight_.fetch_sub(1, std::memory_order_relaxed);
             MetricsRegistry::Instance().inflightFrames().inc(-1);
             MetricsRegistry::Instance().totalErrors().inc();
+            MetricsRegistry::Instance().setTotalErrorTrace(conn->traceId(), conn->sessionId());
             MetricsRegistry::Instance().droppedFrames().inc();
             MetricsRegistry::Instance().inflightRejects().inc();
+            MetricsRegistry::Instance().setInflightRejectTrace(conn->traceId(), conn->sessionId());
             if (cfg.backpressure().sendErrorFrame) {
                 const auto& err = cfg.errorFrames();
                 LengthHeaderCodec::send(conn, err.inflightLimitMsgType, err.inflightLimitBody);
             }
-            SPDLOG_ERROR("too many in-flight frames, drop msgType={}", msgType);
+            SPDLOG_ERROR("too many in-flight frames, drop msgType={} trace={} sess={}", msgType, conn->traceId(), conn->sessionId());
             return;
         }
 
@@ -123,12 +127,13 @@ std::shared_ptr<LengthHeaderCodec> InitServer::buildCodec(const std::shared_ptr<
         try {
             workerPool->submit([router, weak, msgType, body, this]() {
                 if (auto shared = weak.lock()) {
+                    TraceContext::Guard g(shared->traceId(), shared->sessionId());
                     try {
                         router->onMessage(shared, msgType, body);
                     } catch (const std::exception& ex) {
-                        SPDLOG_ERROR("router->onMessage exception: {}", ex.what());
+                        SPDLOG_ERROR("router->onMessage exception: {} trace={} sess={}", ex.what(), shared->traceId(), shared->sessionId());
                     } catch (...) {
-                        SPDLOG_ERROR("router->onMessage unknown exception");
+                        SPDLOG_ERROR("router->onMessage unknown exception trace={} sess={}", shared->traceId(), shared->sessionId());
                     }
                 }
                 MetricsRegistry::Instance().inflightFrames().inc(-1);
@@ -153,7 +158,6 @@ std::shared_ptr<AsioServer> InitServer::buildServer(const ServerConfig& sc, cons
 
     server->setCloseCallback([codec](const ConnectionPtr& conn) {
         codec->onClose(conn);
-        SPDLOG_INFO("[onClose] connection closed");
     });
 
     SPDLOG_INFO("Server built: port={}, ioThreads={}, idleTimeoutMs={}", sc.port, sc.ioThreadsCount, sc.IdleTimeoutMs);

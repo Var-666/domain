@@ -20,6 +20,7 @@ struct MessageContext {
     ConnectionPtr conn;
     std::uint16_t msgType;
     std::shared_ptr<std::string> body;
+    std::string traceId;  // 优先用上游透传的 traceId，默认用 sessionId
 };
 
 using CoMessageHandler = std::function<boost::asio::awaitable<void>(const ConnectionPtr&, std::string_view)>;

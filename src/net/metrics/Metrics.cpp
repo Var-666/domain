@@ -47,8 +47,7 @@ void LatencyMetric::print(const std::string& name, std::ostream& os) const {
         double avg = s.sumMs / s.count;
         os << ", avg=" << std::fixed << std::setprecision(3) << avg << "ms";
     }
-    os << " | buckets(ms) [0-1):" << s.bucket[0] << " [1-5):" << s.bucket[1] << " [5-10):" << s.bucket[2] << " [10-50):" << s.bucket[3]
-       << " [50+):" << s.bucket[4] << "\n";
+    os << " | buckets(ms) [0-1):" << s.bucket[0] << " [1-5):" << s.bucket[1] << " [5-10):" << s.bucket[2] << " [10-50):" << s.bucket[3] << " [50+):" << s.bucket[4] << "\n";
 }
 
 void LatencyMetric::printPrometheus(const std::string& name, std::ostream& os) const {
@@ -145,6 +144,70 @@ void MetricsRegistry::incIpRejectQps() {
     totalErrors_.inc();
 }
 
+void MetricsRegistry::setTokenRejectTrace(const std::string& traceId, const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastTokenRejectTrace_ = traceId;
+    lastTokenRejectSession_ = sessionId;
+    lastTokenRejectValue_ = tokenRejects_.value();
+}
+
+void MetricsRegistry::setConcurrentRejectTrace(const std::string& traceId, const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastConcurrentRejectTrace_ = traceId;
+    lastConcurrentRejectSession_ = sessionId;
+    lastConcurrentRejectValue_ = concurrentRejects_.value();
+}
+
+void MetricsRegistry::setBackpressureDropTrace(const std::string& traceId, const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastBackpressureTrace_ = traceId;
+    lastBackpressureSession_ = sessionId;
+    lastBackpressureDropValue_ = backpressureDroppedLowPri_.value();
+}
+
+void MetricsRegistry::setInflightRejectTrace(const std::string& traceId, const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastInflightRejectTrace_ = traceId;
+    lastInflightRejectSession_ = sessionId;
+    lastInflightRejectValue_ = inflightRejects_.value();
+}
+
+void MetricsRegistry::setIpRejectConnTrace(const std::string& traceId, const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastIpRejectConnTrace_ = traceId;
+    lastIpRejectConnSession_ = sessionId;
+    lastIpRejectConnValue_ = ipRejectConn_.value();
+}
+
+void MetricsRegistry::setIpRejectQpsTrace(const std::string& traceId, const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastIpRejectQpsTrace_ = traceId;
+    lastIpRejectQpsSession_ = sessionId;
+    lastIpRejectQpsValue_ = ipRejectQps_.value();
+}
+
+void MetricsRegistry::setMsgRejectTrace(const std::string& traceId, const std::string& sessionId, std::uint16_t msgType) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastMsgRejectTrace_ = traceId;
+    lastMsgRejectSession_ = sessionId;
+    lastMsgRejectType_ = msgType;
+    lastMsgRejectValue_ = msgRejects_[msgType].load(std::memory_order_relaxed);
+}
+
+void MetricsRegistry::setTotalErrorTrace(const std::string& traceId, const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastTotalErrorTrace_ = traceId;
+    lastTotalErrorSession_ = sessionId;
+    lastTotalErrorValue_ = totalErrors_.value();
+}
+
+void MetricsRegistry::setFrameLatencyTrace(const std::string& traceId, const std::string& sessionId, double latencyMs) {
+    std::lock_guard<std::mutex> lock(exemplarMtx_);
+    lastFrameLatencyTrace_ = traceId;
+    lastFrameLatencySession_ = sessionId;
+    lastFrameLatencyMs_ = latencyMs;
+}
+
 LatencyMetric& MetricsRegistry::frameLatency() { return frameLatency_; }
 
 namespace {
@@ -202,74 +265,135 @@ void MetricsRegistry::printSnapshot(std::ostream& os) const {
 }
 
 void MetricsRegistry::printPrometheus(std::ostream& os) const {
-    // Counters / Gauges
-    os << "# TYPE server_connections gauge\n";
-    os << "server_connections " << connections_.value() << "\n\n";
+    // -----------------------------------------------------------------
+    // 1. 准备阶段：快照读取 (Snapshot)
+    //    一次加锁，把所有需要 Exemplar 的数据复制出来，最大程度减少锁竞争
+    // -----------------------------------------------------------------
+    // 定义结构体
+    struct ExemplarData {
+        std::string trace;
+        std::string sess;
+        int64_t val = 1;  // 改成 int64_t 或 uint64_t
+    };
 
-    os << "# TYPE server_total_frames counter\n";
-    os << "server_total_frames " << totalFrames_.value() << "\n\n";
+    // 定义变量 (此时调用默认构造)
+    ExemplarData errEx, bpEx, inflightEx, tokenEx, concurEx, ipConnEx, ipQpsEx, msgRejEx;
+    std::uint16_t msgRejTypeSnapshot = 0;
+    std::string frameTraceSnapshot;
+    std::string frameSessSnapshot;
+    double frameMsSnapshot = 0.0;
 
-    os << "# TYPE server_total_errors counter\n";
-    os << "server_total_errors " << totalErrors_.value() << "\n\n";
+    {
+        std::lock_guard<std::mutex> lock(exemplarMtx_);
 
-    os << "# TYPE server_bytes_in counter\n";
-    os << "server_bytes_in " << bytesIn_.value() << "\n\n";
+        // 【修正点】：加上类型名 ExemplarData{...}
+        if (!lastTotalErrorTrace_.empty())
+            errEx = ExemplarData{lastTotalErrorTrace_, lastTotalErrorSession_, lastTotalErrorValue_};
 
-    os << "# TYPE server_bytes_out counter\n";
-    os << "server_bytes_out " << bytesOut_.value() << "\n\n";
+        if (!lastBackpressureTrace_.empty())
+            bpEx = ExemplarData{lastBackpressureTrace_, lastBackpressureSession_, lastBackpressureDropValue_};
 
-    os << "# TYPE server_dropped_frames counter\n";
-    os << "server_dropped_frames " << droppedFrames_.value() << "\n\n";
+        if (!lastInflightRejectTrace_.empty())
+            inflightEx = ExemplarData{lastInflightRejectTrace_, lastInflightRejectSession_, lastInflightRejectValue_};
 
-    os << "# TYPE server_backpressure_triggered_total counter\n";
-    os << "server_backpressure_triggered_total " << backpressureTriggered_.value() << "\n\n";
+        if (!lastTokenRejectTrace_.empty())
+            tokenEx = ExemplarData{lastTokenRejectTrace_, lastTokenRejectSession_, lastTokenRejectValue_};
 
-    os << "# TYPE server_backpressure_active gauge\n";
-    os << "server_backpressure_active " << backpressureActive_.value() << "\n\n";
+        if (!lastConcurrentRejectTrace_.empty())
+            concurEx = ExemplarData{lastConcurrentRejectTrace_, lastConcurrentRejectSession_, lastConcurrentRejectValue_};
 
-    os << "# TYPE server_backpressure_drop_lowpri counter\n";
-    os << "server_backpressure_drop_lowpri " << backpressureDroppedLowPri_.value() << "\n\n";
+        if (!lastIpRejectConnTrace_.empty())
+            ipConnEx = ExemplarData{lastIpRejectConnTrace_, lastIpRejectConnSession_, lastIpRejectConnValue_};
 
-    os << "# TYPE server_backpressure_duration_ms counter\n";
-    os << "server_backpressure_duration_ms " << backpressureDurationMs_.value() << "\n\n";
+        if (!lastIpRejectQpsTrace_.empty())
+            ipQpsEx = ExemplarData{lastIpRejectQpsTrace_, lastIpRejectQpsSession_, lastIpRejectQpsValue_};
 
-    os << "# TYPE server_inflight_rejects_total counter\n";
-    os << "server_inflight_rejects_total " << inflightRejects_.value() << "\n\n";
+        if (!lastMsgRejectTrace_.empty()) {
+            msgRejEx = ExemplarData{lastMsgRejectTrace_, lastMsgRejectSession_, lastMsgRejectValue_};
+            msgRejTypeSnapshot = lastMsgRejectType_;
+        }
 
-    os << "# TYPE server_token_rejects_total counter\n";
-    os << "server_token_rejects_total " << tokenRejects_.value() << "\n\n";
+        if (!lastFrameLatencyTrace_.empty()) {
+            frameTraceSnapshot = lastFrameLatencyTrace_;
+            frameSessSnapshot = lastFrameLatencySession_;
+            frameMsSnapshot = lastFrameLatencyMs_;
+        }
+    }
 
-    os << "# TYPE server_concurrent_rejects_total counter\n";
-    os << "server_concurrent_rejects_total " << concurrentRejects_.value() << "\n\n";
+    // -----------------------------------------------------------------
+    // 2. 辅助 Lambda：统一打印逻辑
+    // -----------------------------------------------------------------
+    auto printMetric = [&](const std::string& name, const std::string& type, uint64_t metricValue, const ExemplarData& ex) {
+        os << "# TYPE " << name << " " << type << "\n";
+        os << name << " " << metricValue;
 
-    os << "# TYPE server_send_queue_max_bytes gauge\n";
-    os << "server_send_queue_max_bytes " << sendQueueMaxBytes_.value() << "\n\n";
+        // 如果快照里有 TraceID，说明有样本
+        if (!ex.trace.empty()) {
+            os << " # {trace_id=\"" << ex.trace << "\"";
+            if (!ex.sess.empty()) {
+                os << ",session_id=\"" << ex.sess << "\"";
+            }
+            // 输出你存储的 value
+            os << "} " << ex.val;
+        }
+        os << "\n";
+    };
 
-    os << "# TYPE server_worker_queue_size gauge\n";
-    os << "server_worker_queue_size " << workerQueueSize_.value() << "\n\n";
+    // -----------------------------------------------------------------
+    // 3. 打印核心指标 (使用快照数据)
+    // -----------------------------------------------------------------
+    printMetric("server_total_errors", "counter", totalErrors_.value(), errEx);
+    printMetric("server_backpressure_drop_lowpri", "counter", backpressureDroppedLowPri_.value(), bpEx);
+    printMetric("server_inflight_rejects_total", "counter", inflightRejects_.value(), inflightEx);
+    printMetric("server_token_rejects_total", "counter", tokenRejects_.value(), tokenEx);
+    printMetric("server_concurrent_rejects_total", "counter", concurrentRejects_.value(), concurEx);
+    printMetric("server_ip_reject_conn_total", "counter", ipRejectConn_.value(), ipConnEx);
+    printMetric("server_ip_reject_qps_total", "counter", ipRejectQps_.value(), ipQpsEx);
 
-    os << "# TYPE server_worker_live_threads gauge\n";
-    os << "server_worker_live_threads " << workerLiveThreads_.value() << "\n\n";
+    // -----------------------------------------------------------------
+    // 4. 打印常规指标 (无 Exemplar，传空对象)
+    // -----------------------------------------------------------------
+    ExemplarData emptyEx;
+    printMetric("server_connections", "gauge", connections_.value(), emptyEx);
+    printMetric("server_total_frames", "counter", totalFrames_.value(), emptyEx);
+    printMetric("server_bytes_in", "counter", bytesIn_.value(), emptyEx);
+    printMetric("server_bytes_out", "counter", bytesOut_.value(), emptyEx);
+    printMetric("server_dropped_frames", "counter", droppedFrames_.value(), emptyEx);
+    printMetric("server_backpressure_triggered_total", "counter", backpressureTriggered_.value(), emptyEx);
+    printMetric("server_backpressure_active", "gauge", backpressureActive_.value(), emptyEx);
+    printMetric("server_backpressure_duration_ms", "counter", backpressureDurationMs_.value(), emptyEx);
+    printMetric("server_send_queue_max_bytes", "gauge", sendQueueMaxBytes_.value(), emptyEx);
+    printMetric("server_worker_queue_size", "gauge", workerQueueSize_.value(), emptyEx);
+    printMetric("server_worker_live_threads", "gauge", workerLiveThreads_.value(), emptyEx);
+    printMetric("server_inflight_frames", "gauge", inflightFrames_.value(), emptyEx);
 
-    os << "# TYPE server_ip_reject_conn_total counter\n";
-    os << "server_ip_reject_conn_total " << ipRejectConn_.value() << "\n\n";
-
-    os << "# TYPE server_ip_reject_qps_total counter\n";
-    os << "server_ip_reject_qps_total " << ipRejectQps_.value() << "\n\n";
-
-    os << "# TYPE server_inflight_frames gauge\n";
-    os << "server_inflight_frames " << inflightFrames_.value() << "\n\n";
-
+    // -----------------------------------------------------------------
+    // 5. Map 和 Histogram 保持原样
+    // -----------------------------------------------------------------
     if (!msgRejects_.empty()) {
         os << "# TYPE server_msg_reject_total counter\n";
         std::lock_guard<std::mutex> lock(msgRejectsMtx_);
         for (const auto& kv : msgRejects_) {
-            os << "server_msg_reject_total{msgType=\"" << kv.first << "\"} " << kv.second.load(std::memory_order_relaxed) << "\n";
+            os << "server_msg_reject_total{msgType=\"" << kv.first << "\"} " << kv.second.load(std::memory_order_relaxed);
+            if (!msgRejEx.trace.empty() && kv.first == msgRejTypeSnapshot) {
+                os << " # {trace_id=\"" << msgRejEx.trace << "\"";
+                if (!msgRejEx.sess.empty()) {
+                    os << ",session_id=\"" << msgRejEx.sess << "\"";
+                }
+                os << "} " << msgRejEx.val;
+            }
+            os << "\n";
         }
         os << "\n";
     }
 
-    // Histograms
     frameLatency_.printPrometheus("server_frame_latency_ms", os);
-    os << "\n";
+    if (!frameTraceSnapshot.empty()) {
+        os << "server_frame_latency_ms_sum " << frameMsSnapshot << " # {trace_id=\"" << frameTraceSnapshot << "\"";
+        if (!frameSessSnapshot.empty()) {
+            os << ",session_id=\"" << frameSessSnapshot << "\"";
+        }
+        os << "} " << frameMsSnapshot << "\n";
+    }
+    os << "# EOF\n";
 }

@@ -9,6 +9,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <random>
 #include <string_view>
 
 #include "Buffer.h"
@@ -57,6 +58,10 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
     std::uint64_t lastActiveMs() const;
     // 远端 IP（缓存）。
     std::string remoteIp() const;
+    // 会话 ID（用于日志追踪）。
+    std::string sessionId() const;
+    // traceId（默认等于 sessionId，可被上游覆盖）。
+    std::string traceId() const;
     // 是否处于背压暂停读
     bool isReadPaused() const;
 
@@ -91,4 +96,6 @@ class AsioConnection : public std::enable_shared_from_this<AsioConnection> {
 
     std::atomic<std::uint64_t> lastActiveMs_{0};  // 最近活动时间
     std::string remoteIp_;                        // 缓存远端 IP
+    std::string sessionId_;                       // 会话 ID
+    std::string traceId_;                         // Trace ID（默认=sessionId）
 };

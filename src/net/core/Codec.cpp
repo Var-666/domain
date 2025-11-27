@@ -74,6 +74,7 @@ void LengthHeaderCodec::onMessage(const ConnectionPtr& conn, Buffer& buf) {
             auto end = std::chrono::steady_clock::now();
             double ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count();
             MetricsRegistry::Instance().frameLatency().observe(ms);
+            MetricsRegistry::Instance().setFrameLatencyTrace(conn ? conn->traceId() : "", conn ? conn->sessionId() : "", ms);
         }
         // 7. while(true) 继续尝试解析下一帧（如果 Buffer 中还有完整数据）
     }

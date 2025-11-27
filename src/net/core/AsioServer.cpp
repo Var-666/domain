@@ -13,6 +13,7 @@
 #include "IpLimiter.h"
 #include "ThreadPool.h"
 #include "Codec.h"
+#include "TraceContext.h"
 
 AsioServer::AsioServer(unsigned short port, size_t ioThreadsCount, std::uint64_t idleTimeoutMs)
     : acceptor_(io_context_, boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), port)),
@@ -94,10 +95,11 @@ boost::asio::awaitable<void> AsioServer::acceptLoop() {
             bool ipAllowed = IpLimiter::Instance().allowConn(remoteIp);
             if (!ipAllowed) {
                 MetricsRegistry::Instance().incIpRejectConn();
-                const auto& err = Config::Instance().errorFrames();
+                MetricsRegistry::Instance().setIpRejectConnTrace("", "");
                 auto rejectConn = std::make_shared<AsioConnection>(io_context_, std::move(socket));
-                LengthHeaderCodec::send(rejectConn, err.ipConnLimitMsgType, err.ipConnLimitBody);
+                MetricsRegistry::Instance().setIpRejectConnTrace(rejectConn->traceId(), rejectConn->sessionId());
                 rejectConn->close();
+                TraceContext::Guard g(rejectConn->traceId(), rejectConn->sessionId());
                 SPDLOG_WARN("[IpLimit] reject conn from {} (maxConnPerIp={})", remoteIp, ipCfg.maxConnPerIp);
                 continue;
             }

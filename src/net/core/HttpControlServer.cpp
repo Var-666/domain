@@ -9,6 +9,7 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <iostream>
 #include <sstream>
+#include <cctype>
 
 #include "Metrics.h"
 HttpControlServer::HttpControlServer(unsigned short port, readyCallback readyCheck)
@@ -130,7 +131,15 @@ std::string HttpControlServer::handleRequest(const std::string& request) {
     if (path == "/metrics") {
         std::ostringstream oss;
         MetricsRegistry::Instance().printPrometheus(oss);
-        return buildResponse(200, "OK", oss.str(), "text/plain; version=0.0.4; charset=utf-8");
+        std::string body = oss.str();
+        // 去掉前导空白，避免 scrape 报 invalid start token
+        auto pos = body.find_first_not_of(" \r\n\t");
+        if (pos != std::string::npos) {
+            body = body.substr(pos);
+        } else {
+            body.clear();
+        }
+        return buildResponse(200, "OK", body, "application/openmetrics-text; version=1.0.0; charset=utf-8");
     }
 
     if (path == "/healthz") {
